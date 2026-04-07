@@ -1,5 +1,6 @@
 package com.intranet.repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -9,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import com.intranet.dto.rms.RMSProjectHoursDTO;
 import com.intranet.entity.TimeSheetEntry;
 
 
@@ -84,4 +86,35 @@ List<TimeSheetEntry> findByTimeSheetId(Long timeSheetId);
             LocalDate endDate
     );
     boolean existsByProjectIdAndTaskId(Integer projectId, Integer taskId);
+
+    @Query("""
+    SELECT COALESCE(SUM(e.hoursWorked), 0)
+    FROM TimeSheetEntry e
+    WHERE e.timeSheet.userId = :userId
+    AND e.timeSheet.workDate BETWEEN :startDate AND :endDate
+    AND e.isBillable = true
+    """)
+    BigDecimal getBillableHours(Long userId, LocalDate startDate, LocalDate endDate);
+
+    @Query("""
+    SELECT COALESCE(SUM(e.hoursWorked), 0)
+    FROM TimeSheetEntry e
+    WHERE e.timeSheet.userId = :userId
+    AND e.timeSheet.workDate BETWEEN :startDate AND :endDate
+    AND e.isBillable = false
+    """)
+    BigDecimal getNonBillableHours(Long userId, LocalDate startDate, LocalDate endDate);
+
+
+@Query("""
+    SELECT new com.intranet.dto.rms.RMSProjectHoursDTO(
+        e.projectId,
+        COALESCE(SUM(e.hoursWorked), 0)
+    )
+    FROM TimeSheetEntry e
+    WHERE e.timeSheet.userId = :userId
+    AND e.timeSheet.workDate BETWEEN :startDate AND :endDate
+        GROUP BY e.projectId
+    """)
+    List<RMSProjectHoursDTO> getProjectHours(Long userId, LocalDate startDate, LocalDate endDate);
 }
