@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intranet-timesheet-app
+
+    ports:
+      - "5000:5000"
+
+    env_file:
+      - .env
+
+    restart: unless-stopped
+
+    networks:
+      - intranet-network
+
+    volumes:
+      - timesheet-logs:/app/logs
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
+# ✅ DEFINE NETWORK (THIS WAS MISSING)
+networks:
+  intranet-network:
+    driver: bridge
+
+
+# ✅ DEFINE VOLUME
+volumes:
+  timesheet-logs:
+    driver: local
