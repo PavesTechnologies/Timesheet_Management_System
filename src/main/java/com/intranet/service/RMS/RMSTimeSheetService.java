@@ -10,14 +10,19 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
 import com.intranet.dto.rms.RMSProjectHoursDTO;
 import com.intranet.dto.rms.TimePeriodDataDTO;
 import com.intranet.dto.rms.TimeSheetSummaryResponseDTO;
+import com.intranet.dto.UserHoursDTO;
 import com.intranet.repository.TimeSheetEntryRepo;
 import com.intranet.repository.TimeSheetRepo;
+import com.intranet.service.DashboardService;
+import com.intranet.util.cache.UserDirectoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -40,19 +45,236 @@ public class RMSTimeSheetService {
     private final TimeSheetEntryRepo entryRepository;
     private final InternalProjectRepo internalProjectRepo;
     private final RestTemplate restTemplate;
+    private final DashboardService dashboardService;
+    private final UserDirectoryService userDirectoryService;
 
     @Value("${UMS_API_BASE_URL}")
     private String umsUrl;
 
     public TimeSheetSummaryResponseDTO getSummary(
             LocalDate startDate,
-            LocalDate endDate) {
+            LocalDate endDate,
+            jakarta.servlet.http.HttpServletRequest request) {
 
+        // Handle backward compatibility - if request is null, use original logic
+        if (request == null) {
+            return getSummaryOriginal(startDate, endDate);
+        }
+
+        String authHeader = request.getHeader("Authorization");
+        
+        if (authHeader == null || authHeader.isBlank()) {
+            throw new RuntimeException("Authorization header is required");
+        }
+
+        try {
+            // Get all users from UMS using getUsersWithHours() approach
+            List<Map<String, Object>> users = userDirectoryService.fetchAllUsers2(authHeader);
+            System.out.println("DEBUG: Total users fetched from UMS: " + users.size());
+            
+            // Extract user IDs
+            List<Long> userIds = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .map(user -> ((Number) user.get("id")).longValue())
+                    .collect(Collectors.toList());
+            
+            System.out.println("DEBUG: Users with valid id: " + userIds.size());
+
+            // Get hours summary for all users
+            List<UserHoursDTO> usersHours = dashboardService.getUsersHoursSummary(userIds, startDate, endDate);
+
+            // Create a map of userId -> UserHoursDTO for quick lookup
+            Map<Long, UserHoursDTO> hoursMap = usersHours.stream()
+                    .collect(Collectors.toMap(UserHoursDTO::getUserId, userHours -> userHours));
+
+            // Create user name and role maps from UMS data
+            Map<Long, String> resourceNames = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .collect(Collectors.toMap(
+                            user -> ((Number) user.get("id")).longValue(),
+                            user -> user.get("name") != null ? (String) user.get("name") : "Unknown User"
+                    ));
+
+            Map<Long, String> resourceRoles = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .collect(Collectors.toMap(
+                            user -> ((Number) user.get("id")).longValue(),
+                            user -> user.get("designation") != null ? (String) user.get("designation") : "Employee"
+                    ));
+
+            Long totalUsers = (long) resourceNames.size();
+
+            // Get timesheet data for calculations
+            List<TimeSheet> timeSheets = timeSheetRepository.findByWorkDateBetweenWithWeekInfoAndEntries(startDate, endDate);
+            List<TimeSheetEntry> entries = timeSheets.stream()
+                    .flatMap(ts -> ts.getEntries().stream())
+                    .collect(Collectors.toList());
+
+            Set<Long> internalProjectIds = internalProjectRepo.findAll().stream()
+                    .map(InternalProject::getProjectId)
+                    .filter(pid -> pid != null)
+                    .map(Long::valueOf)
+                    .collect(Collectors.toSet());
+
+            // Group by userId for users with timesheet data
+            Map<Long, List<TimeSheet>> timeSheetsByUser = timeSheets.stream()
+                    .collect(Collectors.groupingBy(TimeSheet::getUserId));
+
+            Map<Long, List<TimeSheetEntry>> entriesByUser = entries.stream()
+                    .collect(Collectors.groupingBy(entry -> entry.getTimeSheet().getUserId()));
+
+            // Calculate overall totals
+            BigDecimal totalHours = timeSheetRepository.getTotalHoursForAllUsers(startDate, endDate);
+            BigDecimal billableHours = entryRepository.getBillableHoursForAllUsers(startDate, endDate);
+            BigDecimal nonBillableHours = entryRepository.getNonBillableHoursForAllUsers(startDate, endDate);
+            List<RMSProjectHoursDTO> projectHours = entryRepository.getProjectHoursForAllUsers(startDate, endDate);
+
+            // Calculate averages
+            BigDecimal averageTotalHours = totalUsers > 0 ? totalHours.divide(BigDecimal.valueOf(totalUsers), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal averageBillableHours = totalUsers > 0 ? billableHours.divide(BigDecimal.valueOf(totalUsers), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal averageNonBillableHours = totalUsers > 0 ? nonBillableHours.divide(BigDecimal.valueOf(totalUsers), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+
+            List<ResourceSummaryDTO> resourceSummaries = new ArrayList<>();
+            
+            // Process ALL users from UMS, including those with 0 hours
+            for (Map.Entry<Long, String> userEntry : resourceNames.entrySet()) {
+                Long uid = userEntry.getKey();
+                if (uid == null) continue; // Skip users without valid ID
+                
+                List<TimeSheet> userTimeSheets = timeSheetsByUser.getOrDefault(uid, new ArrayList<>());
+                List<TimeSheetEntry> userEntries = entriesByUser.getOrDefault(uid, new ArrayList<>());
+
+                BigDecimal userBillableHours = sumEntryHours(userEntries, TimeSheetEntry::isBillable);
+                BigDecimal internalHours = sumEntryHours(userEntries, entry2 -> entry2.getProjectId() != null && internalProjectIds.contains(entry2.getProjectId()));
+                // Non-billable hours exclude internal project hours
+                BigDecimal userNonBillableHours = sumEntryHours(userEntries, entry2 -> !entry2.isBillable() && !(entry2.getProjectId() != null && internalProjectIds.contains(entry2.getProjectId())));
+                BigDecimal autoGeneratedHours = userTimeSheets.stream()
+                        .filter(ts -> Boolean.TRUE.equals(ts.getAutoGenerated()))
+                        .map(ts -> safe(ts.getHoursWorked()))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                BigDecimal entryHours = sumEntryHours(userEntries, entry2 -> true);
+                BigDecimal userTotalHours = entryHours.add(autoGeneratedHours);
+
+                Map<LocalDate, BigDecimal> actualByDate = buildActualByDate(userEntries);
+                Map<LocalDate, Integer> plannedByDate = buildPlannedByDate(startDate, endDate, userTimeSheets);
+                BigDecimal plannedCapacity = plannedByDate.values().stream()
+                        .map(BigDecimal::valueOf)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                double utilizationPercentage = plannedCapacity.compareTo(BigDecimal.ZERO) > 0 ? 
+                    safePercentage(userTotalHours, plannedCapacity) : 0.0;
+                int confidenceScore = userTimeSheets.isEmpty() ? 0 : calculateConfidenceScore(userTimeSheets);
+
+                String hourlySplit = String.format("%.1f/%.1f/%.1f",
+                        userBillableHours.doubleValue(),
+                        userNonBillableHours.add(autoGeneratedHours).doubleValue(),
+                        internalHours.doubleValue());
+
+                String trendSignal = calculateTrend(utilizationPercentage);
+
+                resourceSummaries.add(ResourceSummaryDTO.builder()
+                        .userId(uid)
+                        .name(resourceNames.getOrDefault(uid, "User " + uid))
+                        .billableHours(userBillableHours)
+                        .nonBillableHours(userNonBillableHours.add(autoGeneratedHours))
+                        .internalHours(internalHours)
+                        .totalHours(userTotalHours)
+                        .plannedCapacity(plannedCapacity)
+                        .utilizationPercentage(round(utilizationPercentage))
+                        .confidenceScore(confidenceScore)
+                        .resourceContext(resourceRoles.getOrDefault(uid, "Employee"))
+                        .hourlySplit(hourlySplit)
+                        .trendSignal(trendSignal)
+                        .finalUtilPercentage(round(utilizationPercentage))
+                        .build());
+            }
+
+            System.out.println("DEBUG: Final resourceSummaries size: " + resourceSummaries.size());
+
+        // Overall KPIs
+        BigDecimal overallBillable = resourceSummaries.stream()
+                .map(ResourceSummaryDTO::getBillableHours)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal overallTotal = resourceSummaries.stream()
+                .map(ResourceSummaryDTO::getTotalHours)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal overallPlanned = resourceSummaries.stream()
+                .map(ResourceSummaryDTO::getPlannedCapacity)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        double overallUtil = safePercentage(overallTotal, overallPlanned);
+        BigDecimal overallBillableRatio = overallTotal.compareTo(BigDecimal.ZERO) == 0 ? BigDecimal.ZERO : overallBillable.multiply(BigDecimal.valueOf(100)).divide(overallTotal, 2, RoundingMode.HALF_UP);
+        BigDecimal overallNonBillable = resourceSummaries.stream()
+                .map(ResourceSummaryDTO::getNonBillableHours)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal overallInternal = resourceSummaries.stream()
+                .map(ResourceSummaryDTO::getInternalHours)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        double billablePercentage = overallBillableRatio.doubleValue();
+        double internalNonBillablePercentage = overallTotal.compareTo(BigDecimal.ZERO) == 0 ? 0.0 : overallInternal.multiply(BigDecimal.valueOf(100)).divide(overallTotal, 2, RoundingMode.HALF_UP).doubleValue();
+        double otherNonBillablePercentage = overallTotal.compareTo(BigDecimal.ZERO) == 0 ? 0.0 : overallNonBillable.multiply(BigDecimal.valueOf(100)).divide(overallTotal, 2, RoundingMode.HALF_UP).doubleValue();
+        double totalPercentage = 100.0;
+        int overallConfidence = (int) resourceSummaries.stream().mapToInt(ResourceSummaryDTO::getConfidenceScore).average().orElse(50);
+
+        List<KPIStatDTO> kpiStats = List.of(
+                KPIStatDTO.builder()
+                        .label("Utilization")
+                        .value(String.format("%.2f%%", overallUtil))
+                        .trend(calculateTrend(overallUtil))
+                        .build(),
+                KPIStatDTO.builder()
+                        .label("Billable Ratio")
+                        .value(String.format("%.2f%%", overallBillableRatio.doubleValue()))
+                        .trend(calculateTrend(overallBillableRatio.doubleValue()))
+                        .build(),
+                KPIStatDTO.builder()
+                        .label("Confidence Score")
+                        .value(String.format("%d%%", overallConfidence))
+                        .trend(overallConfidence >= 75 ? "up" : "down")
+                        .build()
+        );
+
+        Map<String, List<PortfolioTrendDTO>> portfolioTrends = Map.of(
+                "daily", buildDailyTrends(startDate, endDate, buildActualByDate(entries), buildPlannedByDate(startDate, endDate, timeSheets)),
+                "weekly", buildWeeklyTrends(startDate, endDate, buildActualByDate(entries), buildPlannedByDate(startDate, endDate, timeSheets)),
+                "monthly", buildMonthlyTrends(startDate, endDate, buildActualByDate(entries), buildPlannedByDate(startDate, endDate, timeSheets))
+        );
+
+                List<AlertDTO> alerts = buildAlerts(startDate, endDate, buildActualByDate(entries), buildPlannedByDate(startDate, endDate, timeSheets), overallUtil, overallConfidence);
+
+        return TimeSheetSummaryResponseDTO.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .totalHours(totalHours)
+                .billableHours(billableHours)
+                .nonBillableHours(nonBillableHours)
+                .projectHours(projectHours)
+                .resourceSummaries(resourceSummaries)
+                .kpiStats(kpiStats)
+                .portfolioTrends(portfolioTrends)
+                .alerts(alerts)
+                .billablePercentage(billablePercentage)
+                .internalNonBillablePercentage(internalNonBillablePercentage)
+                .otherNonBillablePercentage(otherNonBillablePercentage)
+                .totalPercentage(totalPercentage)
+                .build();
+        } catch (Exception e) {
+            System.out.println("DEBUG: Exception occurred in getSummary: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Failed to fetch RMS summary: " + e.getMessage(), e);
+        }
+    }
+
+    // Original method for backward compatibility
+    private TimeSheetSummaryResponseDTO getSummaryOriginal(LocalDate startDate, LocalDate endDate) {
         BigDecimal totalHours = timeSheetRepository.getTotalHoursForAllUsers(startDate, endDate);
         BigDecimal billableHours = entryRepository.getBillableHoursForAllUsers(startDate, endDate);
         BigDecimal nonBillableHours = entryRepository.getNonBillableHoursForAllUsers(startDate, endDate);
         List<RMSProjectHoursDTO> projectHours = entryRepository.getProjectHoursForAllUsers(startDate, endDate);
-        Long totalUsers = timeSheetRepository.getUniqueUserCount(startDate, endDate);
+        
+        // Fetch all users from UMS first to get accurate total count
+        Map<Long, String> resourceNames = fetchResourceNames();
+        Long totalUsers = (long) resourceNames.size();
 
         // Calculate averages
         BigDecimal averageTotalHours = totalUsers > 0 ? totalHours.divide(BigDecimal.valueOf(totalUsers), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
@@ -63,13 +285,6 @@ public class RMSTimeSheetService {
         List<TimeSheetEntry> entries = timeSheets.stream()
                 .flatMap(ts -> ts.getEntries().stream())
                 .collect(Collectors.toList());
-        TimeSheetSummaryResponseDTO response = new TimeSheetSummaryResponseDTO();
-        response.setStartDate(startDate);
-        response.setEndDate(endDate);
-        response.setTotalHours(totalHours);
-        response.setBillableHours(billableHours);
-        response.setNonBillableHours(nonBillableHours);
-        response.setProjectHours(projectHours);
 
         Set<Long> internalProjectIds = internalProjectRepo.findAll().stream()
                 .map(InternalProject::getProjectId)
@@ -77,22 +292,24 @@ public class RMSTimeSheetService {
                 .map(Long::valueOf)
                 .collect(Collectors.toSet());
 
-        // Group by userId if aggregating
+        // Fetch resource roles (resourceNames already fetched above)
+        Map<Long, String> resourceRoles = fetchResourceRoles();
+        
+        // Group by userId if aggregating (only users with timesheet data)
         Map<Long, List<TimeSheet>> timeSheetsByUser = timeSheets.stream()
                 .collect(Collectors.groupingBy(TimeSheet::getUserId));
 
         Map<Long, List<TimeSheetEntry>> entriesByUser = entries.stream()
                 .collect(Collectors.groupingBy(entry -> entry.getTimeSheet().getUserId()));
 
-        // Fetch resource names and roles
-        Map<Long, String> resourceNames = fetchResourceNames();
-        Map<Long, String> resourceRoles = fetchResourceRoles();
-
         List<ResourceSummaryDTO> resourceSummaries = new ArrayList<>();
-        for (Map.Entry<Long, List<TimeSheet>> entry : timeSheetsByUser.entrySet()) {
-            Long uid = entry.getKey();
-            if (uid == null) continue; // Skip timesheets without userId (e.g., system-generated)
-            List<TimeSheet> userTimeSheets = entry.getValue();
+        
+        // Process ALL users from UMS, not just those with timesheet data
+        for (Map.Entry<Long, String> userEntry : resourceNames.entrySet()) {
+            Long uid = userEntry.getKey();
+            if (uid == null) continue; // Skip users without valid ID
+            
+            List<TimeSheet> userTimeSheets = timeSheetsByUser.getOrDefault(uid, new ArrayList<>());
             List<TimeSheetEntry> userEntries = entriesByUser.getOrDefault(uid, new ArrayList<>());
 
             BigDecimal userBillableHours = sumEntryHours(userEntries, TimeSheetEntry::isBillable);
@@ -112,12 +329,13 @@ public class RMSTimeSheetService {
                     .map(BigDecimal::valueOf)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            double utilizationPercentage = safePercentage(totalHours, plannedCapacity);
-            int confidenceScore = calculateConfidenceScore(userTimeSheets);
+            double utilizationPercentage = plannedCapacity.compareTo(BigDecimal.ZERO) > 0 ? 
+                safePercentage(userTotalHours, plannedCapacity) : 0.0;
+            int confidenceScore = userTimeSheets.isEmpty() ? 0 : calculateConfidenceScore(userTimeSheets);
 
             String hourlySplit = String.format("%.1f/%.1f/%.1f",
-                    billableHours.doubleValue(),
-                    nonBillableHours.add(autoGeneratedHours).doubleValue(),
+                    userBillableHours.doubleValue(),
+                    userNonBillableHours.add(autoGeneratedHours).doubleValue(),
                     internalHours.doubleValue());
 
             String trendSignal = calculateTrend(utilizationPercentage);
@@ -125,10 +343,10 @@ public class RMSTimeSheetService {
             resourceSummaries.add(ResourceSummaryDTO.builder()
                     .userId(uid)
                     .name(resourceNames.getOrDefault(uid, "User " + uid))
-                    .billableHours(billableHours)
-                    .nonBillableHours(nonBillableHours.add(autoGeneratedHours))
+                    .billableHours(userBillableHours)
+                    .nonBillableHours(userNonBillableHours.add(autoGeneratedHours))
                     .internalHours(internalHours)
-                    .totalHours(totalHours)
+                    .totalHours(userTotalHours)
                     .plannedCapacity(plannedCapacity)
                     .utilizationPercentage(round(utilizationPercentage))
                     .confidenceScore(confidenceScore)
@@ -191,10 +409,16 @@ public class RMSTimeSheetService {
                 List<AlertDTO> alerts = buildAlerts(startDate, endDate, buildActualByDate(entries), buildPlannedByDate(startDate, endDate, timeSheets), overallUtil, overallConfidence);
 
         return TimeSheetSummaryResponseDTO.builder()
+                .startDate(startDate)
+                .endDate(endDate)
+                .totalHours(totalHours)
+                .billableHours(billableHours)
+                .nonBillableHours(nonBillableHours)
+                .projectHours(projectHours)
                 .resourceSummaries(resourceSummaries)
                 .kpiStats(kpiStats)
                 .portfolioTrends(portfolioTrends)
-                                .alerts(alerts)
+                .alerts(alerts)
                 .billablePercentage(billablePercentage)
                 .internalNonBillablePercentage(internalNonBillablePercentage)
                 .otherNonBillablePercentage(otherNonBillablePercentage)
@@ -203,13 +427,13 @@ public class RMSTimeSheetService {
     }
 
     public List<ResourceSummaryMinimalDTO> getAllResourceSummaries(LocalDate startDate, LocalDate endDate) {
-        return getSummary(startDate, endDate).getResourceSummaries().stream()
+        return getSummary(startDate, endDate, null).getResourceSummaries().stream()
                 .map(this::toMinimalResourceSummary)
                 .collect(Collectors.toList());
     }
 
     public List<UserSummarySimplifiedDTO> getAllUserSummariesSimplified(LocalDate startDate, LocalDate endDate) {
-        return getSummary(startDate, endDate).getResourceSummaries().stream()
+        return getSummary(startDate, endDate, null).getResourceSummaries().stream()
                 .map(this::toUserSummarySimplified)
                 .collect(Collectors.toList());
     }
@@ -519,7 +743,7 @@ public class RMSTimeSheetService {
 
     public MonthlySummaryResponseDTO getMonthlySummary(LocalDate startDate, LocalDate endDate) {
         // Get the base summary
-        TimeSheetSummaryResponseDTO baseSummary = getSummary(startDate, endDate);
+        TimeSheetSummaryResponseDTO baseSummary = getSummary(startDate, endDate, null);
 
         // Format the period label
         String periodLabel = String.format("%s %d PATTERN",
