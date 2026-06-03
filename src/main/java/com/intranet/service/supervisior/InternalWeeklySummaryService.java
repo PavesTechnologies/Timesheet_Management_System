@@ -79,16 +79,12 @@ public class InternalWeeklySummaryService {
         HttpEntity<Void> getEntity = new HttpEntity<>(headers);
 
         // STEP 1: EOS — direct reports for this manager
-        List<String> employeeIds = fetchReportingManagerEmployeeIds(getEntity, managerEmpid);
+        Set<Long> employeeIds = fetchReportingManagerEmployeeIds(getEntity, managerEmpid);
         if (employeeIds.isEmpty()) return Collections.emptyList();
 
-        // STEP 2: UMS — employee_id -> user_id mapping
-        Set<Long> userIds = fetchUserIdsForEmployeeIds(headers, employeeIds);
-        if (userIds.isEmpty()) return Collections.emptyList();
-
-        // STEP 3: Aggregate against the scoped timesheet set
+        // STEP 2: Aggregate against the scoped timesheet set
         Map<Long, Map<String, Object>> userCache = fetchAllUsers(getEntity);
-        List<TimeSheet> scopedSheets = timeSheetRepo.findNonDraftByUserIds(userIds);
+        List<TimeSheet> scopedSheets = timeSheetRepo.findNonDraftByUserIds(employeeIds);
 
         return buildInternalWeeklySummary(scopedSheets, userCache, startOfMonth, endOfMonth);
     }
@@ -200,7 +196,7 @@ public class InternalWeeklySummaryService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> fetchReportingManagerEmployeeIds(HttpEntity<Void> entity, String managerEmpid) {
+    private Set<Long> fetchReportingManagerEmployeeIds(HttpEntity<Void> entity, String managerEmpid) {
         String url = String.format("%s/hr/reporting-manager/%s/employees", eosBaseUrl, managerEmpid);
         try {
             ResponseEntity<Map<String, Object>> res = restTemplate.exchange(
@@ -208,45 +204,22 @@ public class InternalWeeklySummaryService {
                     new ParameterizedTypeReference<Map<String, Object>>() {});
 
             Map<String, Object> body = res.getBody();
-            if (body == null || !body.containsKey("employees")) return Collections.emptyList();
+            if (body == null || !body.containsKey("employees")) return Collections.emptySet();
 
             List<Map<String, Object>> employees = (List<Map<String, Object>>) body.get("employees");
             return employees.stream()
-                    .map(e -> (String) e.get("employee_id"))
-                    .filter(id -> id != null && !id.isBlank())
-                    .collect(Collectors.toList());
+                    .map(e -> e.get("employee_id"))
+                    .filter(id -> id != null)
+                    .map(id -> id instanceof Number
+                            ? ((Number) id).longValue()
+                            : Long.parseLong(id.toString().trim()))
+                    .collect(Collectors.toSet());
         } catch (HttpStatusCodeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "EOS call failed ");
         } catch (RestClientException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "EOS call failed");
-        }
-    }
-
-    private Set<Long> fetchUserIdsForEmployeeIds(HttpHeaders headers, List<String> employeeIds) {
-        String url = String.format("%s/admin/users/employee/ids", umsBaseUrl);
-        try {
-            Map<String, Object> requestBody = Map.of("employee_ids", employeeIds);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<Map<String, Map<String, Object>>> res = restTemplate.exchange(
-                    url, HttpMethod.POST, entity,
-                    new ParameterizedTypeReference<Map<String, Map<String, Object>>>() {});
-
-            Map<String, Map<String, Object>> resp = res.getBody();
-            if (resp == null) return Collections.emptySet();
-
-            return resp.values().stream()
-                    .filter(v -> v != null && v.get("user_id") != null)
-                    .map(v -> ((Number) v.get("user_id")).longValue())
-                    .collect(Collectors.toSet());
-        } catch (HttpStatusCodeException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "UMS lookup failed");
-        } catch (RestClientException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "UMS lookup failed");
         }
     }
 
