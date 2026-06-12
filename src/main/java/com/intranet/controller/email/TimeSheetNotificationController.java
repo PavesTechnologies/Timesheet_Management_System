@@ -20,7 +20,6 @@ import java.util.List;
 @RequiredArgsConstructor
 @RequestMapping("/api/timesheet")
 @Tag(name = "Timesheet Notifications", description = "APIs for sending timesheet summary or status emails and weekly submission emails to managers.")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class TimeSheetNotificationController {
 
     private final TimeSheetNotificationService timeSheetNotificationService;

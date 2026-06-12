@@ -20,6 +20,9 @@ public class EmailService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
+    @Value("${app.frontend.url}")
+    private String frontendBaseUrl;
+
      /**
      * Sends reminder emails to a list of recipients.
      *
@@ -29,7 +32,11 @@ public class EmailService {
         // Define the subject line
         String subject = "Reminder: Timesheet Submission Pending";
 
-        // Beautiful, professional HTML email body
+        String viewLink = frontendBaseUrl != null && !frontendBaseUrl.isBlank()
+                ? frontendBaseUrl
+                : "#";
+
+        // Beautiful, professional HTML email body (link substituted at runtime)
         String htmlBody = """
         <!DOCTYPE html>
         <html>
@@ -55,8 +62,8 @@ public class EmailService {
                     Please take a moment to update your timesheets to ensure accurate record keeping and payroll processing.
                 </p>
                 <div style="text-align:center; margin:30px 0;">
-                    <a href="http://13.202.204.204/"
-                    style="background-color:#0d6efd; color:#ffffff; text-decoration:none; 
+                    <a href="{{VIEW_LINK}}"
+                    style="background-color:#0d6efd; color:#ffffff; text-decoration:none;
                             padding:12px 24px; border-radius:6px; font-size:16px; display:inline-block;">
                     Submit Timesheet
                     </a>
@@ -79,7 +86,7 @@ public class EmailService {
             </table>
         </body>
         </html>
-        """;
+        """.replace("{{VIEW_LINK}}", viewLink);
 
         // Send to each email in the list
         for (String email : emailList) {

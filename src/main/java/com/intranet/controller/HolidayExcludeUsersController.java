@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/holiday-exclude-users")
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 public class HolidayExcludeUsersController {
 
     @Autowired

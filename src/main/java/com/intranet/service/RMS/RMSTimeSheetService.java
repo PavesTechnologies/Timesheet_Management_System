@@ -25,13 +25,9 @@ import com.intranet.service.DashboardService;
 import com.intranet.util.cache.UserDirectoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.DayOfWeek;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.*;
 import java.util.function.Predicate;

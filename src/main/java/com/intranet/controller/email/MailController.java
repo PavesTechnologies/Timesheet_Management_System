@@ -14,7 +14,6 @@ import io.swagger.v3.oas.annotations.Operation;
 
 @RestController
 @RequestMapping("/api/timesheet")
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 @RequiredArgsConstructor
 public class MailController {
 

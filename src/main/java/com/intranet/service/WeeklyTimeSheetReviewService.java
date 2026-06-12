@@ -27,11 +27,14 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import com.intranet.dto.HolidayDTO;
 import com.intranet.dto.email.WeeklySubmissionEmailDTO;
+import com.intranet.entity.InternalProject;
 import com.intranet.entity.TimeSheet;
 import com.intranet.entity.TimeSheetOnHolidaysType;
 import com.intranet.entity.TimeSheetReview;
+import com.intranet.entity.TimesheetSettings;
 import com.intranet.entity.WeekInfo;
 import com.intranet.entity.WeeklyTimeSheetReview;
+import com.intranet.repository.InternalProjectRepo;
 import com.intranet.repository.TimeSheetOnHolidayTypeRepo;
 import com.intranet.repository.TimeSheetRepo;
 import com.intranet.repository.TimeSheetReviewRepo;
@@ -53,6 +56,8 @@ public class WeeklyTimeSheetReviewService {
         private final ManagerNotificationEmailService managerNotificationEmailService;
         private final HolidayExcludeUsersService holidayExcludeUsersService;
         private final TimeSheetOnHolidayTypeRepo timeSheetOnHolidayTypeRepo;
+        private final TimesheetSettingsService timesheetSettingsService;
+        private final InternalProjectRepo internalProjectRepo;
 
         @Value("${tms.api.base-url}")
         private String tmsBaseUrl;
@@ -135,14 +140,19 @@ public class WeeklyTimeSheetReviewService {
     LocalDate end = commonWeek.getEndDate();
     List<LocalDate> weekDates = start.datesUntil(end.plusDays(1)).toList();
 
+    // ✅ Load configurable hour settings (active row or defaults if unset)
+    TimesheetSettings settings = timesheetSettingsService.getActiveSettings();
+    BigDecimal regularHrs = settings.getMinHrsRegular();
+    BigDecimal weekendHrs = settings.getMinHrsWeekend();
+    BigDecimal leaveHrs   = settings.getAutogenLeaveHrs();
+
     // ✅ Step 4: Determine required hours and required dates based on holidays and weekends
-    Map<LocalDate, Integer> requiredHoursPerDate = new LinkedHashMap<>();
+    Map<LocalDate, BigDecimal> requiredHoursPerDate = new LinkedHashMap<>();
 
     for (LocalDate date : weekDates) {
-        int defaultHours;
         boolean isWeekend = date.getDayOfWeek() == java.time.DayOfWeek.SATURDAY ||
                             date.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
-        defaultHours = isWeekend ? 4 : 8;
+        BigDecimal defaultHours = isWeekend ? weekendHrs : regularHrs;
 
         Map<String, Object> holiday = holidayMap.get(date);
         boolean submitAllowed = false;
@@ -179,23 +189,24 @@ public class WeeklyTimeSheetReviewService {
         );
     }
 
-    // ✅ Step 6: Compute total required hours
-    int totalRequiredHours = requiredHoursPerDate.values().stream()
-            .mapToInt(Integer::intValue)
-            .sum();
-    BigDecimal requiredHours = BigDecimal.valueOf(totalRequiredHours);
+    // ✅ Step 6: Compute total required hours (HH.MM literal — sum via minutes)
+    BigDecimal requiredHours = TimeUtil.sumHours(
+            new java.util.ArrayList<>(requiredHoursPerDate.values()));
 
-    // ✅ Step 7: Calculate total worked hours
-    BigDecimal totalWorked = timeSheets.stream()
-            .map(TimeSheet::getHoursWorked)
-            .filter(Objects::nonNull)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    // ✅ Step 7: Calculate total worked hours (HH.MM literal — sum via minutes)
+    BigDecimal totalWorked = TimeUtil.sumHours(
+            timeSheets.stream()
+                    .map(TimeSheet::getHoursWorked)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList()));
 
-    // ✅ Step 8: Validation check
-    if (totalWorked.compareTo(requiredHours) < 0) {
+    // ✅ Step 8: Validation check (compare in minutes to avoid BigDecimal HH.MM pitfalls)
+    long workedMinutes = TimeUtil.hhmmToMinutes(totalWorked);
+    long requiredMinutes = TimeUtil.hhmmToMinutes(requiredHours);
+    if (workedMinutes < requiredMinutes) {
         throw new IllegalArgumentException(String.format(
-            "Weekly total hours %.2f are less than required minimum %.2f hours for week %d.",
-            totalWorked, requiredHours, commonWeek.getWeekNo()
+            "Weekly total hours %s are less than required minimum %s for week %d.",
+            totalWorked.toPlainString(), requiredHours.toPlainString(), commonWeek.getWeekNo()
         ));
     }
             // ✅ Step 7.1: Identify and auto-generate timesheets for submitTimesheet = false dates
@@ -227,10 +238,8 @@ public class WeeklyTimeSheetReviewService {
             boolean isLeave = holiday.get("isLeave") instanceof Boolean &&
                             (Boolean) holiday.get("isLeave");
 
-            // Apply your rules
-            BigDecimal hours = isLeave ?
-                    BigDecimal.valueOf(8) : // Leave
-                    BigDecimal.ZERO;        
+            // Apply configurable settings
+            BigDecimal hours = isLeave ? leaveHrs : BigDecimal.ZERO;
 
             TimeSheet newSheet = new TimeSheet();
             newSheet.setUserId(userId);
@@ -285,10 +294,15 @@ public class WeeklyTimeSheetReviewService {
     review.setReviewedAt(LocalDateTime.now());
     weeklyReviewRepo.save(review);
 
-   
+
    // --------------------------------------------------------------
 // FINAL REVIEW UPDATE LOGIC BASED ON YOUR RULES
 // --------------------------------------------------------------
+
+    // Fetch internal-project IDs once so we can branch per timesheet on internal-only vs external.
+    Map<Long, List<InternalProject>> internalProjectMap =
+            internalProjectRepo.findAll().stream()
+                    .collect(Collectors.groupingBy(ip -> ip.getProjectId().longValue()));
 
     for (TimeSheet ts : timeSheets) {
 
@@ -306,23 +320,33 @@ public class WeeklyTimeSheetReviewService {
         continue; // do nothing
     }
 
-    // 3️⃣ RULE: REJECTED → FIX ONLY REJECTED REVIEWS + TS → SUBMITTED
+    // 3️⃣ RULE: REJECTED → reset reviews + TS → SUBMITTED
     if (ts.getStatus() == TimeSheet.Status.REJECTED) {
 
         List<TimeSheetReview> reviews = timeSheetReviewRepo.findByTimeSheet_Id(ts.getId());
 
-        for (TimeSheetReview r : reviews) {
+        boolean internalOnly = ts.getEntries() != null
+                && ts.getEntries().stream()
+                        .allMatch(e -> internalProjectMap.containsKey(e.getProjectId()));
 
-            // if (r.getStatus() == TimeSheetReview.Status.REJECTED) {
+        if (internalOnly) {
+            // Internal projects have a single admin/RM reviewer.
+            // Delete the stale review rows so the resubmitted day appears as a fresh
+            // SUBMITTED item (no previous-reviewer name lingering on the user-history
+            // tooltip and no "already reviewed" gating on the admin side).
+            if (!reviews.isEmpty()) {
+                timeSheetReviewRepo.deleteAll(reviews);
+            }
+        } else {
+            // External projects can have multiple reviewers (one per project owner).
+            // Keep the rows for audit, just mark them as SUBMITTED again so the
+            // owners see the day re-enter their queue.
+            for (TimeSheetReview r : reviews) {
                 r.setStatus(TimeSheetReview.Status.SUBMITTED);
                 r.setReviewedAt(LocalDateTime.now());
-            // }
-
-            // DO NOT touch APPROVED, SUBMITTED, or PENDING reviews
+            }
+            timeSheetReviewRepo.saveAll(reviews);
         }
-
-        // Save only changed reviews
-        timeSheetReviewRepo.saveAll(reviews);
 
         // Update timesheet
         ts.setStatus(TimeSheet.Status.SUBMITTED);

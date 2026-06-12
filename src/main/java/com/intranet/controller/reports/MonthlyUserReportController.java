@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/report")
 @RequiredArgsConstructor
-@CrossOrigin(allowedHeaders = "*", origins = "*")
 public class MonthlyUserReportController {
 
     private final MonthlyUserReportService reportService;

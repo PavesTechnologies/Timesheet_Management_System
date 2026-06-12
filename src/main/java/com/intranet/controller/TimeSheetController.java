@@ -1,7 +1,6 @@
 package com.intranet.controller;
 
 
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,8 +24,10 @@ import com.intranet.repository.HolidayExcludeUsersRepo;
 import com.intranet.repository.WeekInfoRepo;
 import com.intranet.repository.WeeklyTimeSheetReviewRepo;
 import com.intranet.dto.UserDTO;
+import com.intranet.entity.TimesheetSettings;
 import com.intranet.security.CurrentUser;
 import com.intranet.service.TimeSheetService;
+import com.intranet.service.TimesheetSettingsService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
@@ -52,7 +53,6 @@ import com.intranet.service.TimeUtil;
 
 @RestController
 @RequestMapping("/api/timesheet")
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 public class TimeSheetController {
 
     @Autowired
@@ -66,6 +66,9 @@ public class TimeSheetController {
 
     @Autowired
     private WeeklyTimeSheetReviewRepo weeklyTimeSheetReviewRepo;
+
+    @Autowired
+    private TimesheetSettingsService timesheetSettingsService;
 
 
     private HttpEntity<Void> buildEntityWithAuth() {
@@ -195,17 +198,28 @@ public class TimeSheetController {
             }
         }
 
-        // 🔹 Step 5: Validate total worked hours
+        // 🔹 Step 5: Validate total worked hours against the configurable minimum
         BigDecimal totalWorked = TimeUtil.sumHours(
             entries.stream()
                 .map(e -> TimeUtil.calculateHours(e.getFromTime(), e.getToTime()))
                 .collect(Collectors.toList())
         );
 
-        // Convert HH.MM -> total minutes for accurate comparison
+        TimesheetSettings hourSettings = timesheetSettingsService.getActiveSettings();
+        boolean isWeekend = workDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                || workDate.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
+        BigDecimal minHours = isWeekend
+                ? hourSettings.getMinHrsWeekend()
+                : hourSettings.getMinHrsRegular();
+
         int totalMinutes = convertToMinutes(totalWorked);
-        if (totalMinutes < 8 * 60) { // less than 8 hours
-            return ResponseEntity.badRequest().body("Total working hours must be at least 8 hours.");
+        int requiredMinutes = convertToMinutes(minHours);
+        if (totalMinutes < requiredMinutes) {
+            return ResponseEntity.badRequest().body(String.format(
+                "Total working hours must be at least %s hours for a %s.",
+                minHours.toPlainString(),
+                isWeekend ? "weekend day" : "regular day"
+            ));
         }
 
         // 🔹 Step 6: Proceed with normal timesheet creation

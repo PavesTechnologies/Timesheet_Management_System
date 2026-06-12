@@ -16,7 +16,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/emailSettings")
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 @RequiredArgsConstructor
 public class EmailSettingsController {
 

@@ -1,5 +1,6 @@
 package com.intranet.service;
 
+import com.intranet.dto.ReviewedTimesheetAuditDTO;
 import com.intranet.dto.TimeSheetBulkReviewRequestDTO;
 import com.intranet.entity.InternalProject;
 import com.intranet.entity.TimeSheet;
@@ -16,6 +17,8 @@ import com.intranet.service.email.managerReviews.TimeSheetNotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,6 +78,31 @@ public class TimeSheetReviewService {
 
     @Transactional
     public String reviewMultipleTimesheets(Long managerId, TimeSheetBulkReviewRequestDTO dto) {
+        // Mixed-verdict mode: reviewer sent per-day buckets (approvedTimesheetIds + rejectedTimesheetIds).
+        // Collapse them into the legacy timesheetIds list so the existing validations still apply.
+        boolean mixedMode = (dto.getApprovedTimesheetIds() != null && !dto.getApprovedTimesheetIds().isEmpty())
+                         || (dto.getRejectedTimesheetIds() != null && !dto.getRejectedTimesheetIds().isEmpty());
+        if (mixedMode) {
+            List<Long> approvedIds = dto.getApprovedTimesheetIds() != null ? dto.getApprovedTimesheetIds() : Collections.emptyList();
+            List<Long> rejectedIds = dto.getRejectedTimesheetIds() != null ? dto.getRejectedTimesheetIds() : Collections.emptyList();
+
+            Set<Long> overlap = approvedIds.stream().filter(rejectedIds::contains).collect(Collectors.toSet());
+            if (!overlap.isEmpty()) {
+                throw new IllegalArgumentException("A timesheet cannot appear in both approvedTimesheetIds and rejectedTimesheetIds: " + overlap);
+            }
+            if (!rejectedIds.isEmpty() && (dto.getComments() == null || dto.getComments().isBlank())) {
+                throw new IllegalArgumentException("Comments are required when rejecting a timesheet.");
+            }
+
+            List<Long> merged = new ArrayList<>(approvedIds.size() + rejectedIds.size());
+            merged.addAll(approvedIds);
+            merged.addAll(rejectedIds);
+            dto.setTimesheetIds(merged);
+            // Synthesize a status so the legacy validation at L106-108 passes; the loop below
+            // ignores this when mixedMode is true.
+            dto.setStatus(rejectedIds.isEmpty() ? "APPROVED" : "REJECTED");
+        }
+
         if (dto.getTimesheetIds() == null || dto.getTimesheetIds().isEmpty()) {
             throw new IllegalArgumentException("Timesheet IDs must be provided.");
         }
@@ -198,8 +226,20 @@ public class TimeSheetReviewService {
             review.setManagerId(managerId);
             review.setTimeSheet(ts);
             review.setWeekInfo(weekInfo);
-            review.setStatus(TimeSheetReview.Status.valueOf(dto.getStatus().toUpperCase()));
-            review.setComments(dto.getComments());
+
+            TimeSheetReview.Status reviewStatus;
+            String reviewComment;
+            if (mixedMode) {
+                boolean reject = dto.getRejectedTimesheetIds() != null
+                              && dto.getRejectedTimesheetIds().contains(ts.getId());
+                reviewStatus  = reject ? TimeSheetReview.Status.REJECTED : TimeSheetReview.Status.APPROVED;
+                reviewComment = reject ? dto.getComments() : null;
+            } else {
+                reviewStatus  = TimeSheetReview.Status.valueOf(dto.getStatus().toUpperCase());
+                reviewComment = dto.getComments();
+            }
+            review.setStatus(reviewStatus);
+            review.setComments(reviewComment);
             review.setReviewedAt(LocalDateTime.now());
             reviewRepo.save(review);
 
@@ -293,7 +333,8 @@ public class TimeSheetReviewService {
         boolean allApproved = weekTimeSheets.stream()
                 .allMatch(ts -> ts.getStatus() == TimeSheet.Status.APPROVED);
         boolean anyApproved = weekTimeSheets.stream()
-                .anyMatch(ts -> ts.getStatus() == TimeSheet.Status.PARTIALLY_APPROVED);
+                .anyMatch(ts -> ts.getStatus() == TimeSheet.Status.APPROVED
+                             || ts.getStatus() == TimeSheet.Status.PARTIALLY_APPROVED);
     
 
         WeeklyTimeSheetReview.Status weeklyStatus;
@@ -370,7 +411,19 @@ public class TimeSheetReviewService {
                 emailDTO.setEndDate(weekInfo.getEndDate());
                 emailDTO.setTotalHoursLogged(totalHours);
                 emailDTO.setApprovedBy(managerName);
-                emailDTO.setReason(dto.getComments() != null ? dto.getComments() : "No comments provided.");
+
+                boolean mixedMode = (dto.getApprovedTimesheetIds() != null && !dto.getApprovedTimesheetIds().isEmpty())
+                                 && (dto.getRejectedTimesheetIds() != null && !dto.getRejectedTimesheetIds().isEmpty());
+                String baseReason = dto.getComments() != null ? dto.getComments() : "No comments provided.";
+                if (mixedMode) {
+                    int approvedCount = dto.getApprovedTimesheetIds().size();
+                    int rejectedCount = dto.getRejectedTimesheetIds().size();
+                    emailDTO.setReason(String.format(
+                            "%d day(s) approved, %d day(s) rejected. Reason for rejection: %s",
+                            approvedCount, rejectedCount, baseReason));
+                } else {
+                    emailDTO.setReason(baseReason);
+                }
 
                 emails.add(emailDTO);
             }
@@ -390,6 +443,30 @@ public class TimeSheetReviewService {
 
      @Transactional
     public String reviewInternalTimesheets(Long managerId, TimeSheetBulkReviewRequestDTO dto) {
+
+        // Mixed-verdict mode preprocessing (same as reviewMultipleTimesheets):
+        // collapse approvedTimesheetIds + rejectedTimesheetIds into the legacy fields
+        // so the existing validations apply, and let the loop below branch per-row.
+        boolean mixedMode = (dto.getApprovedTimesheetIds() != null && !dto.getApprovedTimesheetIds().isEmpty())
+                         || (dto.getRejectedTimesheetIds() != null && !dto.getRejectedTimesheetIds().isEmpty());
+        if (mixedMode) {
+            List<Long> approvedIds = dto.getApprovedTimesheetIds() != null ? dto.getApprovedTimesheetIds() : Collections.emptyList();
+            List<Long> rejectedIds = dto.getRejectedTimesheetIds() != null ? dto.getRejectedTimesheetIds() : Collections.emptyList();
+
+            Set<Long> overlap = approvedIds.stream().filter(rejectedIds::contains).collect(Collectors.toSet());
+            if (!overlap.isEmpty()) {
+                throw new IllegalArgumentException("A timesheet cannot appear in both approvedTimesheetIds and rejectedTimesheetIds: " + overlap);
+            }
+            if (!rejectedIds.isEmpty() && (dto.getComments() == null || dto.getComments().isBlank())) {
+                throw new IllegalArgumentException("Comments are required when rejecting a timesheet.");
+            }
+
+            List<Long> merged = new ArrayList<>(approvedIds.size() + rejectedIds.size());
+            merged.addAll(approvedIds);
+            merged.addAll(rejectedIds);
+            dto.setTimesheetIds(merged);
+            dto.setStatus(rejectedIds.isEmpty() ? "APPROVED" : "REJECTED");
+        }
 
         List<TimeSheet> sheets = timeSheetRepo.findAllById(dto.getTimesheetIds());
 
@@ -454,13 +531,25 @@ public class TimeSheetReviewService {
             review.setManagerId(managerId);
             review.setTimeSheet(ts);
             review.setWeekInfo(weekInfo);
-            review.setComments(dto.getComments());
-            review.setStatus(TimeSheetReview.Status.valueOf(dto.getStatus().toUpperCase()));
+
+            TimeSheetReview.Status reviewStatus;
+            String reviewComment;
+            if (mixedMode) {
+                boolean reject = dto.getRejectedTimesheetIds() != null
+                              && dto.getRejectedTimesheetIds().contains(ts.getId());
+                reviewStatus  = reject ? TimeSheetReview.Status.REJECTED : TimeSheetReview.Status.APPROVED;
+                reviewComment = reject ? dto.getComments() : null;
+            } else {
+                reviewStatus  = TimeSheetReview.Status.valueOf(dto.getStatus().toUpperCase());
+                reviewComment = dto.getComments();
+            }
+            review.setComments(reviewComment);
+            review.setStatus(reviewStatus);
             review.setReviewedAt(LocalDateTime.now());
             reviewRepo.save(review);
 
             // Internal project has only one manager → direct status
-            ts.setStatus(TimeSheet.Status.valueOf(dto.getStatus().toUpperCase()));
+            ts.setStatus(TimeSheet.Status.valueOf(reviewStatus.name()));
             ts.setUpdatedAt(LocalDateTime.now());
             timeSheetRepo.save(ts);
         }
@@ -476,5 +565,60 @@ public class TimeSheetReviewService {
         sendReviewNotificationEmails(managerId, dto, sheets);
 
         return dto.getStatus() + " " + sheets.size() + " internal timesheets.";
+    }
+
+    /**
+     * Audit view: list every TimeSheetReview made by this manager, filterable
+     * by reviewed user, week-date range, and review status. Pending/Submitted
+     * reviews are excluded at the controller layer — this method trusts the
+     * statuses passed in.
+     */
+    public Page<ReviewedTimesheetAuditDTO> getReviewedTimesheetsForManager(
+            Long managerId,
+            Long userId,
+            LocalDate startDate,
+            LocalDate endDate,
+            List<TimeSheetReview.Status> statuses,
+            String authHeader,
+            Pageable pageable) {
+
+        Page<TimeSheetReview> page = reviewRepo.findReviewsByManagerWithFilters(
+                managerId, userId, startDate, endDate, statuses, pageable);
+
+        if (page.isEmpty()) {
+            return page.map(r -> ReviewedTimesheetAuditDTO.builder().build());
+        }
+
+        Map<Long, Map<String, Object>> userDir;
+        try {
+            userDir = userDirectoryService.fetchAllUsers(authHeader);
+        } catch (Exception e) {
+            userDir = Collections.emptyMap();
+        }
+        final Map<Long, Map<String, Object>> users = userDir;
+
+        return page.map(review -> {
+            WeekInfo week = review.getWeekInfo();
+            TimeSheet ts = review.getTimeSheet();
+            Map<String, Object> userInfo = users.get(review.getUserId());
+
+            return ReviewedTimesheetAuditDTO.builder()
+                    .reviewId(review.getId())
+                    .userId(review.getUserId())
+                    .userName(userInfo != null && userInfo.get("name") != null
+                            ? userInfo.get("name").toString() : null)
+                    .userEmail(userInfo != null && userInfo.get("email") != null
+                            ? userInfo.get("email").toString() : null)
+                    .weekId(week != null ? week.getId() : null)
+                    .weekStartDate(week != null ? week.getStartDate() : null)
+                    .weekEndDate(week != null ? week.getEndDate() : null)
+                    .timesheetId(ts != null ? ts.getId() : null)
+                    .workDate(ts != null ? ts.getWorkDate() : null)
+                    .hoursWorked(ts != null ? ts.getHoursWorked() : null)
+                    .status(review.getStatus() != null ? review.getStatus().name() : null)
+                    .comments(review.getComments())
+                    .reviewedAt(review.getReviewedAt())
+                    .build();
+        });
     }
 }

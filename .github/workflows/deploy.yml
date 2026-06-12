@@ -1,79 +1,67 @@
-name: Deploy TimeSheetManagement to EC2
+name: Build Push and Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - rms_tms
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  docker-build-push-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout code
+      # 1) Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup JDK 17
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      # 2) Setup Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3) Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          distribution: temurin
-          java-version: '17'
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 3️⃣ Build the JAR
-      - name: Build JAR
-        run: mvn clean package -DskipTests
-
-      # 4️⃣ Verify local JAR exists
-      - name: Verify local JAR
+      # 4) Build Docker image
+      - name: Build Docker image
         run: |
-          ls -lh target/ | grep TimeSheetManagement.jar
-          file target/TimeSheetManagement.jar
+          set -e
+          docker build \
+            -t ${{ secrets.DOCKER_USERNAME }}/intranet-tms:latest .
 
-      # 5️⃣ Remove old JAR on EC2
-      - name: Remove old JAR on EC2
+      # 5) Push Docker image
+      - name: Push Docker image
+        run: |
+          set -e
+          docker push \
+            ${{ secrets.DOCKER_USERNAME }}/intranet-tms:latest
+
+      # 6) Deploy on EC2
+      - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: rm -f ${{ secrets.EC2_PATH }}/TimeSheetManagement.jar
-
-      # 6️⃣ Upload JAR to EC2
-      - name: Upload JAR to EC2 via rsync
-        uses: burnett01/rsync-deployments@7.1.0
-        
-        with:
-            switches: -avz --delete
-            path: target/TimeSheetManagement.jar
-            remote_path: ${{ secrets.EC2_PATH }}/TimeSheetManagement.jar
-            remote_host: ${{ secrets.EC2_HOST }}
-            remote_user: ${{ secrets.EC2_USER }}
-            remote_key: ${{ secrets.EC2_SSH_KEY }}
-
-
-      # 7️⃣ Verify JAR on EC2
-      - name: Verify JAR on EC2
-        uses: appleboy/ssh-action@v1.1.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            ls -lh ${{ secrets.EC2_PATH }}/TimeSheetManagement.jar
-            file ${{ secrets.EC2_PATH }}/TimeSheetManagement.jar
+            set -e
 
-      # 8️⃣ Restart systemd service
-      - name: Restart timesheet.service
-        uses: appleboy/ssh-action@v1.1.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            sudo systemctl daemon-reload
-            sudo systemctl restart timesheet.service
-            sleep 5
-            sudo systemctl status timesheet.service --no-pager
-      
+            echo "Moving to deploy directory..."
+            cd deploy
+
+            echo "Pulling latest image..."
+            docker compose pull
+
+            echo "Restarting containers..."
+            docker compose up -d
+
+            echo "Running containers:"
+            docker ps
+
+      # 7) Deployment confirmation
+      - name: Success
+        run: echo "Build + Push + Deployment completed successfully"

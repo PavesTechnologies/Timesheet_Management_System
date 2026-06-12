@@ -6,7 +6,6 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,7 +22,6 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/timesheets")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 public class ManagerWeeklySummaryController {
 
     @Autowired
@@ -43,6 +41,24 @@ public class ManagerWeeklySummaryController {
         LocalDate endOfMonth = now.withDayOfMonth(now.lengthOfMonth());
             List<ManagerWeeklySummaryDTO> summary =
                 managerWeeklySummaryService.getWeeklySubmittedTimesheetsByManager(user.getId(), authHeader, startOfMonth, endOfMonth);
+
+        return ResponseEntity.ok(summary);
+    }
+
+    @GetMapping("/manager/previous-month/pending")
+    @Operation(summary = "Get previous month's timesheets that are still pending review by this manager")
+    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
+    public ResponseEntity<List<ManagerWeeklySummaryDTO>> getPreviousMonthPendingForManager(
+            @CurrentUser UserDTO user,
+            HttpServletRequest request) {
+
+        String authHeader = request.getHeader("Authorization");
+        LocalDate firstOfPrevMonth = LocalDate.now().minusMonths(1).withDayOfMonth(1);
+        LocalDate lastOfPrevMonth = firstOfPrevMonth.withDayOfMonth(firstOfPrevMonth.lengthOfMonth());
+
+        List<ManagerWeeklySummaryDTO> summary =
+                managerWeeklySummaryService.getPendingTimesheetsByManagerForPreviousMonth(
+                        user.getId(), authHeader, firstOfPrevMonth, lastOfPrevMonth);
 
         return ResponseEntity.ok(summary);
     }

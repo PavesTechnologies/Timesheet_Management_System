@@ -90,7 +90,7 @@ public class ManagerPdfTemplateBuilder {
 
         // Header
         html.append("<h1>Manager Monthly Report</h1>");
-        String period = monthName(Integer.parseInt(monthStr)) + " " + yearStr;
+        String period = resolvePeriod(monthStr, yearStr);
 
         html.append("<p class=\"muted\"><strong>")
             .append(esc(period))
@@ -489,6 +489,16 @@ public class ManagerPdfTemplateBuilder {
         if (o == null) return "";
         // If LocalDate / LocalDateTime, use toString (already ok)
         return o.toString();
+    }
+
+    private String resolvePeriod(String monthStr, String yearStr) {
+        try {
+            if (monthStr != null && !monthStr.isBlank()) {
+                return monthName(Integer.parseInt(monthStr)) + " " + yearStr;
+            }
+        } catch (NumberFormatException ignored) {}
+
+        return (monthStr + " " + yearStr).trim();
     }
 
     // Escape for XML/XHTML

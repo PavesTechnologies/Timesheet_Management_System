@@ -16,7 +16,6 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/weeklyReview")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*",allowedHeaders = "*")
 public class WeeklyTimeSheetReviewController {
 
     private final WeeklyTimeSheetReviewService reviewService;

@@ -26,7 +26,7 @@ public class FinancialReportPdfController {
     private final FinancialPdfEmailSender emailSender;
 
     @GetMapping("/monthly_pdf")
-    @PreAuthorize("hasAuthority('VIEW_FINANCE_REPORT')")
+    @PreAuthorize("hasAuthority('TIMESHEET_ADMIN')")
     @Operation(summary = "Send Monthly Financial Report PDF via Email")
     public ResponseEntity<?> sendFinancialReportEmail(
             @CurrentUser UserDTO currentUser,

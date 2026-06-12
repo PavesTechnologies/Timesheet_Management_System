@@ -1,11 +1,10 @@
 services:
   app:
-    platform: linux/arm64
     build:
       context: .
       dockerfile: Dockerfile
-    # image: pavesadmin/intranet-lms:v1
     container_name: intranet-timesheet-app
+    image: pavesadmin/intranet-tms:latest
 
     ports:
       - "5000:5000"

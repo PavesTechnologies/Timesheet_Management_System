@@ -16,7 +16,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/timesheets")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class TimeSheetBulkMultiReviewController {
 
     private final TimeSheetBulkMultiReviewService bulkMultiReviewService;
