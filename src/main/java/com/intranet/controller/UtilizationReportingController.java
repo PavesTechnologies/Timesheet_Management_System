@@ -11,6 +11,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.LocalDate;
@@ -25,11 +26,11 @@ public class UtilizationReportingController {
 
     @PostMapping("/report")
     @Operation(summary = "Generate comprehensive utilization report with filtering")
-    public ResponseEntity<UtilizationReportResponseDTO> generateReport(@Valid @RequestBody UtilizationReportRequestDTO request) {
+    public ResponseEntity<UtilizationReportResponseDTO> generateReport(@Valid @RequestBody UtilizationReportRequestDTO request, HttpServletRequest httpRequest) {
         log.info("Generating utilization report: type={}, startDate={}, endDate={}", 
                 request.getReportType(), request.getStartDate(), request.getEndDate());
         
-        UtilizationReportResponseDTO response = utilizationReportingService.generateUtilizationReport(request);
+        UtilizationReportResponseDTO response = utilizationReportingService.generateUtilizationReport(request, httpRequest);
         
         return ResponseEntity.ok(response);
     }
@@ -39,7 +40,8 @@ public class UtilizationReportingController {
     public ResponseEntity<UtilizationReportResponseDTO> quickReport(
             @RequestParam(required = false) String reportType,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            HttpServletRequest httpRequest) {
         
         // Default to current month if no dates provided
         LocalDate today = LocalDate.now();
@@ -58,19 +60,19 @@ public class UtilizationReportingController {
                 .underUtilizationThreshold(60.0)
                 .build();
         
-        UtilizationReportResponseDTO response = utilizationReportingService.generateUtilizationReport(request);
+        UtilizationReportResponseDTO response = utilizationReportingService.generateUtilizationReport(request, httpRequest);
         
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/export/excel")
     @Operation(summary = "Export utilization report to Excel")
-    public void exportToExcel(@Valid @RequestBody UtilizationReportRequestDTO request, HttpServletResponse response) throws IOException {
+    public void exportToExcel(@Valid @RequestBody UtilizationReportRequestDTO request, HttpServletResponse response, HttpServletRequest httpRequest) throws IOException {
         log.info("Exporting utilization report to Excel: type={}, startDate={}, endDate={}", 
                 request.getReportType(), request.getStartDate(), request.getEndDate());
         
         // Generate the report first
-        UtilizationReportResponseDTO reportData = utilizationReportingService.generateUtilizationReport(request);
+        UtilizationReportResponseDTO reportData = utilizationReportingService.generateUtilizationReport(request, httpRequest);
         
         // Set response headers
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -87,12 +89,12 @@ public class UtilizationReportingController {
 
     @PostMapping("/export/csv")
     @Operation(summary = "Export utilization report to CSV")
-    public void exportToCSV(@Valid @RequestBody UtilizationReportRequestDTO request, HttpServletResponse response) throws IOException {
+    public void exportToCSV(@Valid @RequestBody UtilizationReportRequestDTO request, HttpServletResponse response, HttpServletRequest httpRequest) throws IOException {
         log.info("Exporting utilization report to CSV: type={}, startDate={}, endDate={}", 
                 request.getReportType(), request.getStartDate(), request.getEndDate());
         
         // Generate the report first
-        UtilizationReportResponseDTO reportData = utilizationReportingService.generateUtilizationReport(request);
+        UtilizationReportResponseDTO reportData = utilizationReportingService.generateUtilizationReport(request, httpRequest);
         
         // Set response headers
         response.setContentType("text/csv");
