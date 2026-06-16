@@ -7,6 +7,9 @@ import com.intranet.repository.TimeSheetRepo;
 import com.intranet.repository.TimeSheetEntryRepo;
 import com.intranet.repository.InternalProjectRepo;
 import com.intranet.service.RMS.RMSTimeSheetService;
+import com.intranet.service.DashboardService;
+import com.intranet.util.cache.UserDirectoryService;
+import com.intranet.dto.UserHoursDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,59 +31,111 @@ public class UtilizationReportingService {
     private final TimeSheetEntryRepo entryRepository;
     private final InternalProjectRepo internalProjectRepo;
     private final RMSTimeSheetService rmsTimeSheetService;
+    private final DashboardService dashboardService;
+    private final UserDirectoryService userDirectoryService;
 
-    public UtilizationReportResponseDTO generateUtilizationReport(UtilizationReportRequestDTO request) {
+    public UtilizationReportResponseDTO generateUtilizationReport(UtilizationReportRequestDTO request, jakarta.servlet.http.HttpServletRequest httpRequest) {
         log.info("Generating utilization report: type={}, startDate={}, endDate={}", 
                 request.getReportType(), request.getStartDate(), request.getEndDate());
 
         // Validate request
         validateRequest(request);
 
-        // Get filtered timesheet data
-        List<TimeSheet> filteredTimeSheets = getFilteredTimeSheets(request);
-        List<TimeSheetEntry> filteredEntries = getFilteredEntries(filteredTimeSheets, request);
-
-        // Build response
-        UtilizationReportResponseDTO response = UtilizationReportResponseDTO.builder()
-                .startDate(request.getStartDate())
-                .endDate(request.getEndDate())
-                .reportType(request.getReportType())
-                .groupBy(request.getGroupBy())
-                .approvedDataOnly(request.isApprovedOnly())
-                .build();
-
-        // Calculate based on report type
-        switch (request.getReportType().toUpperCase()) {
-            case "RESOURCE":
-                buildResourceReport(response, filteredTimeSheets, filteredEntries, request);
-                break;
-            case "PROJECT":
-                buildProjectReport(response, filteredTimeSheets, filteredEntries, request);
-                break;
-            case "CLIENT":
-                buildClientReport(response, filteredTimeSheets, filteredEntries, request);
-                break;
-            case "ROLE":
-                buildRoleReport(response, filteredTimeSheets, filteredEntries, request);
-                break;
-            case "SUMMARY":
-            default:
-                buildSummaryReport(response, filteredTimeSheets, filteredEntries, request);
-                break;
+        // Handle backward compatibility - if request is null, use original logic
+        if (httpRequest == null) {
+            return generateUtilizationReportOriginal(request);
         }
 
-        // Add trends if requested
-        if (request.isIncludeTrends()) {
-            response.setTrends(buildTrends(filteredTimeSheets, filteredEntries, request));
+        String authHeader = httpRequest.getHeader("Authorization");
+        
+        if (authHeader == null || authHeader.isBlank()) {
+            throw new RuntimeException("Authorization header is required");
         }
 
-        // Add alerts if requested
-        if (request.isIncludeAlerts()) {
-            response.setAlerts(buildAlerts(response, request));
-            response.setPatterns(buildPatterns(response, request));
-        }
+        try {
+            // Get all users from UMS using getUsersWithHours() approach
+            List<Map<String, Object>> users = userDirectoryService.fetchAllUsers2(authHeader);
+            log.info("DEBUG: Total users fetched from UMS: {}", users.size());
+            
+            // Extract user IDs
+            List<Long> userIds = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .map(user -> ((Number) user.get("id")).longValue())
+                    .collect(Collectors.toList());
+            
+            log.info("DEBUG: Users with valid id: {}", userIds.size());
 
-        return response;
+            // Get hours summary for all users
+            List<UserHoursDTO> usersHours = dashboardService.getUsersHoursSummary(userIds, request.getStartDate(), request.getEndDate());
+
+            // Create a map of userId -> UserHoursDTO for quick lookup
+            Map<Long, UserHoursDTO> hoursMap = usersHours.stream()
+                    .collect(Collectors.toMap(UserHoursDTO::getUserId, userHours -> userHours));
+
+            // Create user name and role maps from UMS data
+            Map<Long, String> resourceNames = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .collect(Collectors.toMap(
+                            user -> ((Number) user.get("id")).longValue(),
+                            user -> user.get("name") != null ? (String) user.get("name") : "Unknown User"
+                    ));
+
+            Map<Long, String> resourceRoles = users.stream()
+                    .filter(user -> user.get("id") != null)
+                    .collect(Collectors.toMap(
+                            user -> ((Number) user.get("id")).longValue(),
+                            user -> user.get("designation") != null ? (String) user.get("designation") : "Employee"
+                    ));
+
+            // Get filtered timesheet data
+            List<TimeSheet> filteredTimeSheets = getFilteredTimeSheets(request);
+            List<TimeSheetEntry> filteredEntries = getFilteredEntries(filteredTimeSheets, request);
+
+            // Build response
+            UtilizationReportResponseDTO response = UtilizationReportResponseDTO.builder()
+                    .startDate(request.getStartDate())
+                    .endDate(request.getEndDate())
+                    .reportType(request.getReportType())
+                    .groupBy(request.getGroupBy())
+                    .approvedDataOnly(request.isApprovedOnly())
+                    .build();
+
+            // Calculate based on report type
+            switch (request.getReportType().toUpperCase()) {
+                case "RESOURCE":
+                    buildResourceReportWithAllUsers(response, filteredTimeSheets, filteredEntries, request, resourceNames, resourceRoles, hoursMap);
+                    break;
+                case "PROJECT":
+                    buildProjectReport(response, filteredTimeSheets, filteredEntries, request);
+                    break;
+                case "CLIENT":
+                    buildClientReport(response, filteredTimeSheets, filteredEntries, request);
+                    break;
+                case "ROLE":
+                    buildRoleReport(response, filteredTimeSheets, filteredEntries, request);
+                    break;
+                case "SUMMARY":
+                default:
+                    buildSummaryReportWithAllUsers(response, filteredTimeSheets, filteredEntries, request, resourceNames, resourceRoles, hoursMap);
+                    break;
+            }
+
+            // Add trends if requested
+            if (request.isIncludeTrends()) {
+                response.setTrends(buildTrends(filteredTimeSheets, filteredEntries, request));
+            }
+
+            // Add alerts if requested
+            if (request.isIncludeAlerts()) {
+                response.setAlerts(buildAlerts(response, request));
+                response.setPatterns(buildPatterns(response, request));
+            }
+
+            return response;
+        } catch (Exception e) {
+            log.error("Exception occurred in generateUtilizationReport: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to generate utilization report: " + e.getMessage(), e);
+        }
     }
 
     private void validateRequest(UtilizationReportRequestDTO request) {
@@ -524,7 +579,7 @@ public class UtilizationReportingService {
 
     private Map<String, List<PortfolioTrendDTO>> buildTrends(List<TimeSheet> timeSheets, List<TimeSheetEntry> entries, UtilizationReportRequestDTO request) {
         // Reuse existing trend building logic from RMSTimeSheetService
-        return rmsTimeSheetService.getSummary(request.getStartDate(), request.getEndDate()).getPortfolioTrends();
+        return rmsTimeSheetService.getSummary(request.getStartDate(), request.getEndDate(), null).getPortfolioTrends();
     }
 
     private List<UtilizationAlertDTO> buildAlerts(UtilizationReportResponseDTO response, UtilizationReportRequestDTO request) {
@@ -1139,5 +1194,131 @@ public class UtilizationReportingService {
         }
         
         return alerts;
+    }
+
+    // Original method for backward compatibility
+    private UtilizationReportResponseDTO generateUtilizationReportOriginal(UtilizationReportRequestDTO request) {
+        log.info("Generating utilization report (original logic): type={}, startDate={}, endDate={}", 
+                request.getReportType(), request.getStartDate(), request.getEndDate());
+
+        // Validate request
+        validateRequest(request);
+
+        // Get filtered timesheet data
+        List<TimeSheet> filteredTimeSheets = getFilteredTimeSheets(request);
+        List<TimeSheetEntry> filteredEntries = getFilteredEntries(filteredTimeSheets, request);
+
+        // Build response
+        UtilizationReportResponseDTO response = UtilizationReportResponseDTO.builder()
+                .startDate(request.getStartDate())
+                .endDate(request.getEndDate())
+                .reportType(request.getReportType())
+                .groupBy(request.getGroupBy())
+                .approvedDataOnly(request.isApprovedOnly())
+                .build();
+
+        // Calculate based on report type
+        switch (request.getReportType().toUpperCase()) {
+            case "RESOURCE":
+                buildResourceReport(response, filteredTimeSheets, filteredEntries, request);
+                break;
+            case "PROJECT":
+                buildProjectReport(response, filteredTimeSheets, filteredEntries, request);
+                break;
+            case "CLIENT":
+                buildClientReport(response, filteredTimeSheets, filteredEntries, request);
+                break;
+            case "ROLE":
+                buildRoleReport(response, filteredTimeSheets, filteredEntries, request);
+                break;
+            case "SUMMARY":
+            default:
+                buildSummaryReport(response, filteredTimeSheets, filteredEntries, request);
+                break;
+        }
+
+        // Add trends if requested
+        if (request.isIncludeTrends()) {
+            response.setTrends(buildTrends(filteredTimeSheets, filteredEntries, request));
+        }
+
+        // Add alerts if requested
+        if (request.isIncludeAlerts()) {
+            response.setAlerts(buildAlerts(response, request));
+            response.setPatterns(buildPatterns(response, request));
+        }
+
+        return response;
+    }
+
+    // New method that includes ALL users from UMS
+    private void buildResourceReportWithAllUsers(UtilizationReportResponseDTO response, 
+                                               List<TimeSheet> timeSheets, 
+                                               List<TimeSheetEntry> entries, 
+                                               UtilizationReportRequestDTO request,
+                                               Map<Long, String> resourceNames,
+                                               Map<Long, String> resourceRoles,
+                                               Map<Long, UserHoursDTO> hoursMap) {
+        
+        log.info("DEBUG: Building resource report with ALL users from UMS. Total users: {}", resourceNames.size());
+        
+        // Group by resource for users with timesheet data
+        Map<Long, List<TimeSheet>> timeSheetsByResource = timeSheets.stream()
+                .collect(Collectors.groupingBy(TimeSheet::getUserId));
+        
+        Map<Long, List<TimeSheetEntry>> entriesByResource = entries.stream()
+                .collect(Collectors.groupingBy(entry -> entry.getTimeSheet().getUserId()));
+
+        List<ResourceUtilizationDTO> resourceUtilizations = new ArrayList<>();
+        
+        // Process ALL users from UMS, including those with 0 hours
+        for (Map.Entry<Long, String> userEntry : resourceNames.entrySet()) {
+            Long resourceId = userEntry.getKey();
+            if (resourceId == null) continue;
+            
+            List<TimeSheet> resourceTimeSheets = timeSheetsByResource.getOrDefault(resourceId, new ArrayList<>());
+            List<TimeSheetEntry> resourceEntries = entriesByResource.getOrDefault(resourceId, new ArrayList<>());
+            
+            ResourceUtilizationDTO resourceUtil = calculateResourceUtilization(
+                    resourceId, 
+                    resourceNames.get(resourceId),
+                    resourceRoles.get(resourceId),
+                    resourceTimeSheets, 
+                    resourceEntries, 
+                    request);
+            
+            resourceUtilizations.add(resourceUtil);
+        }
+        
+        log.info("DEBUG: Final resourceUtilizations size: {}", resourceUtilizations.size());
+        
+        // Sort by utilization percentage descending
+        resourceUtilizations.sort((a, b) -> b.getUtilizationPercentage().compareTo(a.getUtilizationPercentage()));
+        
+        response.setResourceUtilizations(resourceUtilizations);
+        response.setTotalResources(resourceUtilizations.size());
+        
+        // Calculate overall metrics
+        calculateOverallMetrics(response, resourceUtilizations);
+    }
+
+    // New method for summary report with all users
+    private void buildSummaryReportWithAllUsers(UtilizationReportResponseDTO response, 
+                                              List<TimeSheet> timeSheets, 
+                                              List<TimeSheetEntry> entries, 
+                                              UtilizationReportRequestDTO request,
+                                              Map<Long, String> resourceNames,
+                                              Map<Long, String> resourceRoles,
+                                              Map<Long, UserHoursDTO> hoursMap) {
+        
+        log.info("DEBUG: Building summary report with ALL users from UMS. Total users: {}", resourceNames.size());
+        
+        // Build resource report first (this will include all users)
+        buildResourceReportWithAllUsers(response, timeSheets, entries, request, resourceNames, resourceRoles, hoursMap);
+        
+        // Build project, client, and role reports (these remain the same as they depend on actual data)
+        buildProjectReport(response, timeSheets, entries, request);
+        buildClientReport(response, timeSheets, entries, request);
+        buildRoleReport(response, timeSheets, entries, request);
     }
 }

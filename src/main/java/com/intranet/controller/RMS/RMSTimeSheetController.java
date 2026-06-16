@@ -2,6 +2,8 @@ package com.intranet.controller.RMS;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,7 +15,11 @@ import com.intranet.dto.rms.ResourceSummaryMinimalDTO;
 import com.intranet.dto.rms.MonthlySummaryResponseDTO;
 import com.intranet.dto.rms.TimeSheetSummaryResponseDTO;
 import com.intranet.dto.rms.UserSummarySimplifiedDTO;
+import com.intranet.dto.UserHoursDTO;
 import com.intranet.service.RMS.RMSTimeSheetService;
+import com.intranet.service.DashboardService;
+import com.intranet.util.cache.UserDirectoryService;
+import jakarta.servlet.http.HttpServletRequest;
 
 import io.swagger.v3.oas.annotations.Operation;
 
@@ -26,15 +32,17 @@ import lombok.RequiredArgsConstructor;
 public class RMSTimeSheetController {
 
     private final RMSTimeSheetService timeSheetService;
+    private final DashboardService dashboardService;
+    private final UserDirectoryService userDirectoryService;
 
     @GetMapping("/RMS/summary")
     @Operation(summary = "Get RMS utilization intelligence summary")
     public ResponseEntity<TimeSheetSummaryResponseDTO> getSummary(
-            @RequestParam(required = false) Long userId,
             @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
                     LocalDate startDate,
             @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
-                    LocalDate endDate) {
+                    LocalDate endDate,
+            HttpServletRequest request) {
 
         // Default to current month if no dates provided
         LocalDate today = LocalDate.now();
@@ -45,7 +53,7 @@ public class RMSTimeSheetController {
         LocalDate effectiveEndDate = endDate != null ? endDate : defaultEndDate;
 
         return ResponseEntity.ok(
-                timeSheetService.getSummary(effectiveStartDate, effectiveEndDate)
+                timeSheetService.getSummary(effectiveStartDate, effectiveEndDate, request)
         );
     }
 
