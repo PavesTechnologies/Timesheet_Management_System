@@ -19,6 +19,7 @@ import com.intranet.entity.WeeklyTimeSheetReview;
 import com.intranet.repository.TimeSheetRepo;
 import com.intranet.repository.TimeSheetReviewRepo;
 import com.intranet.repository.WeeklyTimeSheetReviewRepo;
+import com.intranet.util.PmsProjectUtils;
 
 import lombok.RequiredArgsConstructor;
 
@@ -68,20 +69,7 @@ public class ManagerSummaryService {
         }
 
         // Collect memberIds
-        Set<Long> memberIds = new HashSet<>();
-        for (Map<String, Object> p : projects) {
-            List<Map<String, Object>> members =
-                    (List<Map<String, Object>>) p.get("members");
-
-            if (members != null) {
-                for (Map<String, Object> m : members) {
-                    Number idNum = (Number) m.get("id");
-                    if (idNum != null) {
-                        memberIds.add(idNum.longValue());
-                    }
-                }
-            }
-        }
+        Set<Long> memberIds = PmsProjectUtils.extractMemberIds(projects);
 
         if (memberIds.isEmpty()) {
             return emptySummary(startDate, endDate);

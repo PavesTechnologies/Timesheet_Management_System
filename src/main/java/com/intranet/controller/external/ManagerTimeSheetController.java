@@ -5,9 +5,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -23,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 
 import com.intranet.dto.UserDTO;
 import com.intranet.security.CurrentUser;
+import com.intranet.util.PmsProjectUtils;
 
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
@@ -67,11 +66,7 @@ public class ManagerTimeSheetController {
     }
 
     // Step 3: Collect all unique member IDs from all projects
-    Set<Long> memberIds = projects.stream()
-            .flatMap(p -> Optional.ofNullable((List<Map<String, Object>>) p.get("members"))
-                    .orElse(Collections.emptyList()).stream())
-            .map(m -> ((Number) m.get("id")).longValue())
-            .collect(Collectors.toSet());
+    Set<Long> memberIds = PmsProjectUtils.extractMemberIds(projects);
 
     if (memberIds.isEmpty()) {
         return ResponseEntity.ok(Collections.emptyList());
