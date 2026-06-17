@@ -31,6 +31,7 @@ import com.intranet.entity.WeekInfo;
 import com.intranet.repository.TimeSheetOnHolidaysRepo;
 import com.intranet.repository.TimeSheetRepo;
 import com.intranet.service.TimeUtil;
+import com.intranet.util.PmsProjectUtils;
 
 import lombok.RequiredArgsConstructor;
 
@@ -61,10 +62,7 @@ public class ManagerWeeklySummaryService {
     if (projects == null || projects.isEmpty()) return Collections.emptyList();
 
     // Step 2: Get all member IDs under these projects
-    Set<Long> memberIds = projects.stream()
-            .flatMap(p -> ((List<Map<String, Object>>) p.get("members")).stream())
-            .map(m -> ((Number) m.get("id")).longValue())
-            .collect(Collectors.toSet());
+    Set<Long> memberIds = PmsProjectUtils.extractMemberIds(projects);
     if (memberIds.isEmpty()) return Collections.emptyList();
 
     // Step 3: Fetch all non-draft timesheets of these members
@@ -336,10 +334,7 @@ private TimeSheetSummaryDTO mapToSummaryDTOForManager(TimeSheet ts, Long manager
         if (projects == null || projects.isEmpty()) return Collections.emptyList();
 
         // Step 2: member ids under those projects
-        Set<Long> memberIds = projects.stream()
-                .flatMap(p -> ((List<Map<String, Object>>) p.get("members")).stream())
-                .map(m -> ((Number) m.get("id")).longValue())
-                .collect(Collectors.toSet());
+        Set<Long> memberIds = PmsProjectUtils.extractMemberIds(projects);
         if (memberIds.isEmpty()) return Collections.emptyList();
 
         // Step 3: non-draft timesheets for those members
@@ -476,10 +471,7 @@ private TimeSheetSummaryDTO mapToSummaryDTOForManager(TimeSheet ts, Long manager
     if (projects == null || projects.isEmpty()) return Collections.emptyList();
 
     // Step 2: Get all member IDs under these projects
-    Set<Long> memberIds = projects.stream()
-            .flatMap(p -> ((List<Map<String, Object>>) p.get("members")).stream())
-            .map(m -> ((Number) m.get("id")).longValue())
-            .collect(Collectors.toSet());
+    Set<Long> memberIds = PmsProjectUtils.extractMemberIds(projects);
     if (memberIds.isEmpty()) return Collections.emptyList();
 
     // Step 3: Fetch all non-draft timesheets of these members

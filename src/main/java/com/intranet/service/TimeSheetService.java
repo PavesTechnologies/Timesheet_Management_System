@@ -416,10 +416,9 @@ public class TimeSheetService {
                             }
 
                             return members.stream()
-                                    .anyMatch(m -> Objects.equals(
-                                            ((Number) m.get("id")).longValue(),
-                                            userId
-                                    ));
+                                    .anyMatch(m -> m != null
+                                            && m.get("id") instanceof Number n
+                                            && Objects.equals(n.longValue(), userId));
                         })
                         .toList();
 
