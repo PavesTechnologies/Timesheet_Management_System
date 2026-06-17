@@ -8,6 +8,7 @@ import com.intranet.entity.TimeSheetEntry;
 import com.intranet.repository.InternalProjectRepo;
 import com.intranet.repository.TimeSheetRepo;
 import com.intranet.util.UtilizationCalculationUtils;
+import com.intranet.util.cache.ProjectDirectoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +28,7 @@ public class ProjectUtilizationService {
 
     private final TimeSheetRepo timeSheetRepository;
     private final InternalProjectRepo internalProjectRepo;
+    private final ProjectDirectoryService projectDirectoryService;
 
     public UtilizationPageResponseDTO<ProjectUtilizationDTO> getProjectsPage(
             LocalDate startDate, LocalDate endDate,
@@ -34,10 +36,11 @@ public class ProjectUtilizationService {
             String sortBy, String sortDir,
             String search,
             boolean approvedOnly,
-            double overThreshold, double underThreshold) {
+            double overThreshold, double underThreshold,
+            String auth) {
 
         List<ProjectUtilizationDTO> all =
-                buildAll(startDate, endDate, approvedOnly, overThreshold, underThreshold);
+                buildAll(startDate, endDate, approvedOnly, overThreshold, underThreshold, auth);
 
         if (search != null && !search.isBlank()) {
             String term = search.trim().toLowerCase();
@@ -55,7 +58,8 @@ public class ProjectUtilizationService {
 
     private List<ProjectUtilizationDTO> buildAll(LocalDate startDate, LocalDate endDate,
                                                   boolean approvedOnly,
-                                                  double overThreshold, double underThreshold) {
+                                                  double overThreshold, double underThreshold,
+                                                  String auth) {
 
         List<TimeSheet> timeSheets =
                 timeSheetRepository.findByWorkDateBetweenWithWeekInfoAndEntries(startDate, endDate);
@@ -69,12 +73,24 @@ public class ProjectUtilizationService {
                 .flatMap(ts -> ts.getEntries().stream())
                 .collect(Collectors.toList());
 
-        // Load internalProjectIds ONCE
-        Set<Long> internalProjectIds = internalProjectRepo.findAll().stream()
-                .map(InternalProject::getProjectId)
-                .filter(Objects::nonNull)
-                .map(Long::valueOf)
-                .collect(Collectors.toSet());
+        // Load internal projects ONCE: projectId (as Long) -> InternalProject
+        Map<Long, InternalProject> internalProjectMap = internalProjectRepo.findAll().stream()
+                .filter(ip -> ip.getProjectId() != null)
+                .collect(Collectors.toMap(
+                        ip -> ip.getProjectId().longValue(),
+                        ip -> ip,
+                        (a, b) -> a
+                ));
+        Set<Long> internalProjectIds = internalProjectMap.keySet();
+
+        // Fetch external project directory from PMS (cached, fails gracefully)
+        Map<Long, Map<String, Object>> projectDirectory = Collections.emptyMap();
+        if (auth != null && !auth.isBlank()) {
+            try {
+                projectDirectory = projectDirectoryService.fetchAllProjects(auth);
+            } catch (Exception ignored) {
+            }
+        }
 
         int totalWorkingDays = UtilizationCalculationUtils.calculateWorkingDays(startDate, endDate);
 
@@ -119,10 +135,27 @@ public class ProjectUtilizationService {
             List<String> alerts = UtilizationCalculationUtils.buildAlertMessages(
                     band, overUtil, underUtil, " for project " + projectId);
 
+            Map<String, Object> projectInfo = projectDirectory.get(projectId);
+            InternalProject internalProject = internalProjectMap.get(projectId);
+
+            String projectName;
+            String clientName;
+            if (projectInfo != null && projectInfo.get("name") != null) {
+                projectName = projectInfo.get("name").toString();
+                clientName = projectInfo.get("clientName") != null
+                        ? projectInfo.get("clientName").toString() : null;
+            } else if (internalProject != null) {
+                projectName = internalProject.getProjectName();
+                clientName = null;
+            } else {
+                projectName = "Project " + projectId;
+                clientName = null;
+            }
+
             result.add(ProjectUtilizationDTO.builder()
                     .projectId(projectId)
-                    .projectName("Project " + projectId)
-                    .clientName("Client " + projectId)
+                    .projectName(projectName)
+                    .clientName(clientName)
                     .totalHours(totalHours)
                     .billableHours(billable)
                     .plannedHours(planned)
