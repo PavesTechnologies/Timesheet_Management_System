@@ -114,8 +114,20 @@ public class ProjectDirectoryService {
         // -----------------------------
         // Final Project Object
         // -----------------------------
+        // Extract client name (PMS may return "client" as an object or "clientName" as a string)
+        Object clientObj = p.get("client");
+        String clientName = null;
+        if (clientObj instanceof Map<?, ?> clientMap) {
+            clientName = clientMap.get("name") != null ? clientMap.get("name").toString() : null;
+        } else if (clientObj instanceof String s && !s.isBlank()) {
+            clientName = s;
+        } else if (p.get("clientName") instanceof String s && !s.isBlank()) {
+            clientName = s;
+        }
+
         map.put("id", id);
         map.put("name", name);
+        if (clientName != null) map.put("clientName", clientName);
         map.put("ownerId", ownerId);
         map.put("ownerName", ownerName);
         map.put("ownerEmail", ownerEmail);

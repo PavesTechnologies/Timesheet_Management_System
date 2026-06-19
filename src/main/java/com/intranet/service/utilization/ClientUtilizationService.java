@@ -2,10 +2,13 @@ package com.intranet.service.utilization;
 
 import com.intranet.dto.rms.ClientUtilizationDTO;
 import com.intranet.dto.rms.UtilizationPageResponseDTO;
+import com.intranet.entity.InternalProject;
 import com.intranet.entity.TimeSheet;
 import com.intranet.entity.TimeSheetEntry;
+import com.intranet.repository.InternalProjectRepo;
 import com.intranet.repository.TimeSheetRepo;
 import com.intranet.util.UtilizationCalculationUtils;
+import com.intranet.util.cache.ProjectDirectoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +28,8 @@ import java.util.stream.Collectors;
 public class ClientUtilizationService {
 
     private final TimeSheetRepo timeSheetRepository;
+    private final InternalProjectRepo internalProjectRepo;
+    private final ProjectDirectoryService projectDirectoryService;
 
     public UtilizationPageResponseDTO<ClientUtilizationDTO> getClientsPage(
             LocalDate startDate, LocalDate endDate,
@@ -32,10 +37,11 @@ public class ClientUtilizationService {
             String sortBy, String sortDir,
             String search,
             boolean approvedOnly,
-            double overThreshold, double underThreshold) {
+            double overThreshold, double underThreshold,
+            String auth) {
 
         List<ClientUtilizationDTO> all =
-                buildAll(startDate, endDate, approvedOnly, overThreshold, underThreshold);
+                buildAll(startDate, endDate, approvedOnly, overThreshold, underThreshold, auth);
 
         if (search != null && !search.isBlank()) {
             String term = search.trim().toLowerCase();
@@ -51,7 +57,8 @@ public class ClientUtilizationService {
 
     private List<ClientUtilizationDTO> buildAll(LocalDate startDate, LocalDate endDate,
                                                  boolean approvedOnly,
-                                                 double overThreshold, double underThreshold) {
+                                                 double overThreshold, double underThreshold,
+                                                 String auth) {
 
         List<TimeSheet> timeSheets =
                 timeSheetRepository.findByWorkDateBetweenWithWeekInfoAndEntries(startDate, endDate);
@@ -65,13 +72,51 @@ public class ClientUtilizationService {
                 .flatMap(ts -> ts.getEntries().stream())
                 .collect(Collectors.toList());
 
+        // Load internal projects ONCE: projectId (as Long) -> InternalProject
+        Map<Long, InternalProject> internalProjectMap = internalProjectRepo.findAll().stream()
+                .filter(ip -> ip.getProjectId() != null)
+                .collect(Collectors.toMap(
+                        ip -> ip.getProjectId().longValue(),
+                        ip -> ip,
+                        (a, b) -> a
+                ));
+
+        // Fetch external project directory from PMS (cached, fails gracefully)
+        Map<Long, Map<String, Object>> projectDirectory = Collections.emptyMap();
+        if (auth != null && !auth.isBlank()) {
+            try {
+                projectDirectory = projectDirectoryService.fetchAllProjects(auth);
+            } catch (Exception ignored) {
+            }
+        }
+
+        // Build projectId -> clientName lookup
+        final Map<Long, Map<String, Object>> finalProjectDirectory = projectDirectory;
+        final Map<Long, InternalProject> finalInternalProjectMap = internalProjectMap;
+        Map<Long, String> clientNameByProjectId = new HashMap<>();
+        for (TimeSheetEntry e : allEntries) {
+            if (e.getProjectId() != null) {
+                clientNameByProjectId.computeIfAbsent(e.getProjectId(), pid -> {
+                    Map<String, Object> info = finalProjectDirectory.get(pid);
+                    if (info != null && info.get("clientName") != null) {
+                        return info.get("clientName").toString();
+                    }
+                    InternalProject ip = finalInternalProjectMap.get(pid);
+                    if (ip != null && ip.getProjectName() != null) {
+                        return ip.getProjectName();
+                    }
+                    return "Project " + pid;
+                });
+            }
+        }
+
         int totalWorkingDays = UtilizationCalculationUtils.calculateWorkingDays(startDate, endDate);
 
-        // Group entries by client (projectId used as client proxy)
+        // Group entries by resolved client name
         Map<String, List<TimeSheetEntry>> entriesByClient = new LinkedHashMap<>();
         for (TimeSheetEntry e : allEntries) {
             if (e.getProjectId() != null) {
-                String key = "Client_" + e.getProjectId();
+                String key = clientNameByProjectId.get(e.getProjectId());
                 entriesByClient.computeIfAbsent(key, k -> new ArrayList<>()).add(e);
             }
         }

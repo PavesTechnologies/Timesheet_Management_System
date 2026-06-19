@@ -129,13 +129,15 @@ public class UtilizationAnalyticsController {
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "true") boolean approvedOnly,
             @RequestParam(defaultValue = "90.0") double overThreshold,
-            @RequestParam(defaultValue = "60.0") double underThreshold) {
+            @RequestParam(defaultValue = "60.0") double underThreshold,
+            HttpServletRequest request) {
 
         size = clampSize(size);
+        String auth = resolveAuth(request);
         LocalDate[] range = range(startDate, endDate);
         return ResponseEntity.ok(projectService.getProjectsPage(
                 range[0], range[1], page, size, sortBy, sortDir, search,
-                approvedOnly, overThreshold, underThreshold));
+                approvedOnly, overThreshold, underThreshold, auth));
     }
 
     // ─── 3c. Clients (paginated) ──────────────────────────────────────────────
@@ -154,13 +156,15 @@ public class UtilizationAnalyticsController {
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "true") boolean approvedOnly,
             @RequestParam(defaultValue = "90.0") double overThreshold,
-            @RequestParam(defaultValue = "60.0") double underThreshold) {
+            @RequestParam(defaultValue = "60.0") double underThreshold,
+            HttpServletRequest request) {
 
         size = clampSize(size);
+        String auth = resolveAuth(request);
         LocalDate[] range = range(startDate, endDate);
         return ResponseEntity.ok(clientService.getClientsPage(
                 range[0], range[1], page, size, sortBy, sortDir, search,
-                approvedOnly, overThreshold, underThreshold));
+                approvedOnly, overThreshold, underThreshold, auth));
     }
 
     // ─── 3d. Roles (paginated) ────────────────────────────────────────────────
