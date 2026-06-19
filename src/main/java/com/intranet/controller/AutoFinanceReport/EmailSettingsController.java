@@ -28,6 +28,23 @@ public class EmailSettingsController {
         return emailSettingsService.getAllEmailSettings();
     }
 
+    @PostMapping
+    @Operation(summary = "Create email settings")
+    @PreAuthorize("hasAuthority('TIMESHEET_ADMIN')")
+    public EmailSettings createEmailSettings(
+            @CurrentUser UserDTO user,
+            @RequestBody Map<String, String> requestBody
+    ) {
+
+        String email = requestBody.get("email");
+
+        if (email == null || email.trim().isEmpty()) {
+            throw new IllegalArgumentException("Email field is required");
+        }
+
+        return emailSettingsService.createEmailSettings(email, user.getId(), user.getName());
+    }
+
     @PutMapping("/{id}")
     @Operation(summary = "Update email settings")
     @PreAuthorize("hasAuthority('TIMESHEET_ADMIN')")
