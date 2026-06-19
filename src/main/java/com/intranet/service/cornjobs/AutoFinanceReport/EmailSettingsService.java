@@ -18,6 +18,14 @@ public class EmailSettingsService {
         return emailSettingsRepository.findAll();
     }
 
+    public EmailSettings createEmailSettings(String email, Long employeeId, String employeeName) {
+        EmailSettings emailSettings = new EmailSettings();
+        emailSettings.setEmail(email);
+        emailSettings.setEmployeeid(employeeId);
+        emailSettings.setEmployeeName(employeeName);
+        return emailSettingsRepository.save(emailSettings);
+    }
+
     public EmailSettings updateEmailSettings(Long id, String email, Long employeeId, String employeeName) {
     return emailSettingsRepository.findById(id)
         .map(existing -> {
