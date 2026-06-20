@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -221,6 +222,38 @@ public class InternalWeeklySummaryService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "EOS call failed");
         }
+    }
+
+    // -------------------------------------------------------------
+    // REPORTING-MANAGER USERS (for the holiday-exclude dropdown)
+    // Returns the manager's direct reports in { id, fullName, email } shape.
+    // -------------------------------------------------------------
+    public List<Map<String, Object>> getReportingManagerUsers(String authHeader, String managerEmpid) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", authHeader);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        Set<Long> employeeIds = fetchReportingManagerEmployeeIds(entity, managerEmpid);
+        if (employeeIds.isEmpty()) return Collections.emptyList();
+
+        Map<Long, Map<String, Object>> userCache = fetchAllUsers(entity);
+
+        return employeeIds.stream()
+                .map(id -> {
+                    Map<String, Object> info = userCache.get(id);
+                    String email = (info != null && info.get("mail") != null)
+                            ? info.get("mail").toString()
+                            : "";
+
+                    Map<String, Object> dto = new LinkedHashMap<>();
+                    dto.put("id", id);
+                    dto.put("fullName", extractName(info));
+                    dto.put("email", email);
+                    return dto;
+                })
+                .sorted(Comparator.comparing(u -> ((String) u.get("fullName")).toLowerCase()))
+                .collect(Collectors.toList());
     }
 
     private String extractName(Map<String, Object> user) {
