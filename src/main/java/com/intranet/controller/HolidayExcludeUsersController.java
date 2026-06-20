@@ -23,7 +23,7 @@ public class HolidayExcludeUsersController {
     private HolidayExcludeUsersService service;
 
     @PostMapping("/create")
-    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
+    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET') or hasAuthority('REVIEW_INTERNAL_TIMESHEET')")
     @Operation(summary = "Create Holiday Exclude Users Entry by a manager")
     public ResponseEntity<String> createHolidayExclude(
         @CurrentUser UserDTO manager,
@@ -38,7 +38,7 @@ public class HolidayExcludeUsersController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
+    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET') or hasAuthority('REVIEW_INTERNAL_TIMESHEET')")
     @Operation(summary = "Get all Holiday Exclude Users for current manager")
     public ResponseEntity<?> getAllForManager(@CurrentUser UserDTO manager) {
         try {
@@ -48,7 +48,7 @@ public class HolidayExcludeUsersController {
         }
     }
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
+    @PreAuthorize("hasAuthority('APPROVE_TIMESHEET') or hasAuthority('REVIEW_INTERNAL_TIMESHEET')")
     @Operation(summary = "Delete Holiday Exclude Users Entry")
     public ResponseEntity<?> deleteHolidayExclude(
             @CurrentUser UserDTO manager,
@@ -62,7 +62,7 @@ public class HolidayExcludeUsersController {
     }
 
         @PutMapping("/{id}")
-        @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
+        @PreAuthorize("hasAuthority('APPROVE_TIMESHEET') or hasAuthority('REVIEW_INTERNAL_TIMESHEET')")
         @Operation(summary = "Update Holiday Exclude Users Entry")
         public ResponseEntity<?> updateHolidayExclude(
                 @CurrentUser UserDTO manager,
