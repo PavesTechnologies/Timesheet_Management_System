@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/timesheets")
@@ -73,5 +74,24 @@ public class InternalWeeklySummaryController {
                         authHeader, managerEmpid, startOfMonth, endOfMonth);
 
         return ResponseEntity.ok(summary);
+    }
+
+
+    @GetMapping("/reporting-manager/users")
+    @Operation(summary = "Get the current reporting manager's direct reports (for holiday-exclude dropdown)")
+    @PreAuthorize("hasAuthority('REVIEW_INTERNAL_TIMESHEET') or hasAuthority('TIMESHEET_ADMIN')")
+    public ResponseEntity<List<Map<String, Object>>> getReportingManagerUsers(
+            @CurrentUser UserDTO user,
+            HttpServletRequest request) {
+
+        String authHeader = request.getHeader("Authorization");
+
+        String managerEmpid = user.getEmployee_id();
+        if (managerEmpid == null || managerEmpid.isBlank() || "No OBS User UUID".equals(managerEmpid)) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+
+        return ResponseEntity.ok(
+                internalWeeklyService.getReportingManagerUsers(authHeader, managerEmpid));
     }
 }
