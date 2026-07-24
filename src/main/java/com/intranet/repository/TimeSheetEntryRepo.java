@@ -8,14 +8,15 @@ import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
+
 
 import com.intranet.dto.rms.RMSProjectHoursDTO;
+import com.intranet.entity.TimeSheet;
 import com.intranet.entity.TimeSheetEntry;
 
 
 
-@Repository
+
 public interface TimeSheetEntryRepo extends JpaRepository<TimeSheetEntry, Long>{
 List<TimeSheetEntry> findByTimeSheetId(Long timeSheetId);
 // ✅ Duplicate exact range
@@ -144,4 +145,19 @@ List<TimeSheetEntry> findByTimeSheetId(Long timeSheetId);
         GROUP BY e.projectId
     """)
     List<RMSProjectHoursDTO> getProjectHoursForAllUsers(LocalDate startDate, LocalDate endDate);
+
+    @Query("""
+    SELECT e.timeSheet.userId, SUM(e.hoursWorked)
+    FROM TimeSheetEntry e
+    WHERE e.projectId = :projectId
+    AND e.isBillable = true
+    AND e.timeSheet.status = :status
+    AND e.timeSheet.workDate BETWEEN :startDate AND :endDate
+    GROUP BY e.timeSheet.userId
+    """)
+    List<Object[]> findApprovedBillableHoursByProjectAndDateRange(
+            @Param("projectId") Long projectId,
+            @Param("status") TimeSheet.Status status,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 }
