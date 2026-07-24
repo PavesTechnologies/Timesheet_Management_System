@@ -150,7 +150,7 @@ public class ManagerSummaryService {
         // ------------------------------
         // 5️⃣ Missing Timesheets
         // ------------------------------
-        List<Map<String, Object>> missing = computeMissing(memberIds, nameCache, emailCache);
+        List<Map<String, Object>> missing = computeMissing(memberIds, managerId, nameCache, emailCache);
 
         // ------------------------------
         // 6️⃣ Weekly Summary
@@ -276,6 +276,7 @@ public class ManagerSummaryService {
     // ------------------------------
     private List<Map<String, Object>> computeMissing(
             Set<Long> users,
+            Long managerId,
             Map<Long, String> names,
             Map<Long, String> emails) {
 
@@ -292,6 +293,8 @@ public class ManagerSummaryService {
                 .collect(Collectors.toSet());
 
         for (Long id : users) {
+            // Skip the manager themselves — a manager's team list should not include their own timesheet.
+            if (id.equals(managerId)) continue;
             if (!active.contains(id)) {
                 Map<String, Object> m = new HashMap<>();
                 m.put("userId", id);
