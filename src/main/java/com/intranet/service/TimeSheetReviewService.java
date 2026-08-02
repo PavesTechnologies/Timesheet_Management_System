@@ -148,8 +148,14 @@ public class TimeSheetReviewService {
             WeeklyTimeSheetReview.Status weeklyStatus = existingReview.getStatus();
 
             // 🚫 Case 1: Already fully reviewed (approved/rejected)
-            if (weeklyStatus == WeeklyTimeSheetReview.Status.APPROVED ||
-                weeklyStatus == WeeklyTimeSheetReview.Status.REJECTED) {
+            // ✅ Exception: allow a reviewer to overturn THEIR OWN rejection
+            // (reject → approve) directly, without the employee having to resubmit.
+            // isSelfRejectionOverturn is true only when this manager is approving
+            // sheets they themselves previously rejected — so an APPROVED week can
+            // never be re-opened (it would not carry this manager's REJECTED review).
+            boolean selfOverturn = isSelfRejectionOverturn(managerId, sheets, status);
+            if ((weeklyStatus == WeeklyTimeSheetReview.Status.APPROVED ||
+                weeklyStatus == WeeklyTimeSheetReview.Status.REJECTED) && !selfOverturn) {
                 throw new IllegalArgumentException(String.format(
                     "Cannot review timesheets for user ID %d in week %d (%s - %s) because it is already %s.",
                     userId,
@@ -279,6 +285,21 @@ public class TimeSheetReviewService {
             System.err.println("⚠️ Failed to fetch PMS projects: " + e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * True when this manager is APPROVING sheets they themselves previously REJECTED.
+     * Used to let a reviewer overturn their own rejection (reject → approve) without
+     * requiring the employee to resubmit. Only ever true for an approval action and
+     * only when every target sheet carries this manager's own REJECTED review.
+     */
+    private boolean isSelfRejectionOverturn(Long managerId, List<TimeSheet> sheets, String status) {
+        if (!"APPROVED".equalsIgnoreCase(status)) return false;
+        if (sheets == null || sheets.isEmpty()) return false;
+        return sheets.stream().allMatch(ts ->
+                reviewRepo.findByTimeSheet_IdAndManagerId(ts.getId(), managerId)
+                        .map(r -> r.getStatus() == TimeSheetReview.Status.REJECTED)
+                        .orElse(false));
     }
 
     /** ✅ Corrected logic — checks all managers who SHOULD review, not only existing reviews */
@@ -519,7 +540,20 @@ public class TimeSheetReviewService {
         // --------------------------------------------------------
         for (TimeSheet ts : sheets) {
 
-            if (ts.getStatus() == TimeSheet.Status.APPROVED || ts.getStatus() == TimeSheet.Status.REJECTED) {
+            // ✅ Allow overturning THIS reviewer's own rejection (reject → approve) directly,
+            // without an employee resubmit. Only when this sheet is being APPROVED and it
+            // currently carries this manager's own REJECTED review.
+            boolean approvingThisSheet = mixedMode
+                    ? (dto.getRejectedTimesheetIds() == null
+                            || !dto.getRejectedTimesheetIds().contains(ts.getId()))
+                    : "APPROVED".equalsIgnoreCase(dto.getStatus());
+            boolean selfOverturn = approvingThisSheet
+                    && ts.getStatus() == TimeSheet.Status.REJECTED
+                    && reviewRepo.findByTimeSheet_IdAndManagerId(ts.getId(), managerId)
+                            .map(r -> r.getStatus() == TimeSheetReview.Status.REJECTED)
+                            .orElse(false);
+            if ((ts.getStatus() == TimeSheet.Status.APPROVED
+                    || ts.getStatus() == TimeSheet.Status.REJECTED) && !selfOverturn) {
                 throw new IllegalArgumentException("Timesheet already reviewed.");
             }
 
