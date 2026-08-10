@@ -2,6 +2,7 @@ package com.intranet.service.billing;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -32,31 +33,43 @@ public class BillingTimesheetService {
         Map<Long, Map<String, Object>> userDirectory =
                 userDirectoryService.fetchAllUsers(getAuthorizationHeader());
 
-        List<Object[]> rows = timeSheetEntryRepo.findApprovedBillableHoursByProjectAndDateRange(
+        List<Object[]> rows = timeSheetEntryRepo.findApprovedBillableTimesheetsByProjectAndDateRange(
                 projectId, TimeSheet.Status.APPROVED, startDate, endDate);
 
         List<BillingTimesheetItemDTO> timesheets = rows.stream()
                 .map(row -> {
-                    Long userId = (Long) row[0];
-                    BigDecimal hours = (BigDecimal) row[1];
+                    Long timesheetId = ((Number) row[0]).longValue();
+                    Long userId = row[1] != null ? ((Number) row[1]).longValue() : null;
+                    LocalDate workDate = (LocalDate) row[2];
+                    BigDecimal hours = row[3] != null ? (BigDecimal) row[3] : BigDecimal.ZERO;
+                    TimeSheet.Status approvalStatus = row[4] != null ? (TimeSheet.Status) row[4] : TimeSheet.Status.APPROVED;
+
                     Map<String, Object> user = userDirectory.get(userId);
                     String resourceName = user != null && user.get("name") != null
                             ? user.get("name").toString()
                             : "Unknown Resource";
+                    String role = user != null && user.get("role") != null
+                            ? user.get("role").toString()
+                            : "Unknown";
 
                     return new BillingTimesheetItemDTO(
-                            buildTimesheetId(projectId, userId, startDate, endDate),
+                            String.valueOf(timesheetId),
                             userId,
                             resourceName,
-                            hours);
+                            workDate,
+                            hours,
+                            role,
+                            approvalStatus.name());
                 })
-                .collect(Collectors.toList());
+                .collect(Collectors.toCollection(ArrayList::new));
 
-        return new BillingSnapshotResponseDTO(projectId, startDate, endDate, timesheets);
-    }
+        BillingSnapshotResponseDTO response = new BillingSnapshotResponseDTO();
+        response.setProjectId(projectId);
+        response.setBillingPeriodStart(startDate);
+        response.setBillingPeriodEnd(endDate);
+        response.setTimesheets(timesheets);
 
-    private String buildTimesheetId(Long projectId, Long userId, LocalDate startDate, LocalDate endDate) {
-        return String.format("BILL-%d-%d-%s-%s", projectId, userId, startDate, endDate);
+        return response;
     }
 
     private String getAuthorizationHeader() {

@@ -321,12 +321,13 @@ public class WeeklySummaryService {
         boolean anyRejected = sheetDTOs.stream().anyMatch(ts -> "Rejected".equalsIgnoreCase(ts.getStatus()));
         boolean allApproved = !sheetDTOs.isEmpty() && sheetDTOs.stream().allMatch(ts -> "Approved".equalsIgnoreCase(ts.getStatus()));
         boolean anyApproved = sheetDTOs.stream().anyMatch(ts -> "Partially Approved".equalsIgnoreCase(ts.getStatus()) || "Approved".equalsIgnoreCase(ts.getStatus()));
-        
-        
+        // A week is still a draft until the user submits it — every day must be DRAFT.
+        boolean allDraft = !sheetDTOs.isEmpty() && sheetDTOs.stream().allMatch(ts -> "DRAFT".equalsIgnoreCase(ts.getStatus()));
 
         if (anyRejected) weekDTO.setWeeklyStatus("REJECTED");
         else if (allApproved) weekDTO.setWeeklyStatus("APPROVED");
         else if (anyApproved) weekDTO.setWeeklyStatus("PARTIALLY APPROVED");
+        else if (allDraft) weekDTO.setWeeklyStatus("DRAFT");
         else weekDTO.setWeeklyStatus("SUBMITTED");
 
         return weekDTO;
