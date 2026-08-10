@@ -57,6 +57,7 @@ public class UserDirectoryService {
                                 Map<String, Object> userMap = new HashMap<>();
                                 userMap.put("name", fullName.isEmpty() ? "Unknown User" : fullName);
                                 userMap.put("email", email);
+                                userMap.put("role", extractRole(u));
                                 return userMap;
                             }
                     ));
@@ -97,6 +98,7 @@ public class UserDirectoryService {
                         userMap.put("id", id);
                         userMap.put("name", fullName.isEmpty() ? "Unknown User" : fullName);
                         userMap.put("email", email);
+                        userMap.put("role", extractRole(u));
                         return userMap;
                     })
                     .collect(Collectors.toList());
@@ -106,5 +108,27 @@ public class UserDirectoryService {
             return List.of();
         }
         }
+
+    private String extractRole(Map<String, Object> user) {
+        Object role = user.get("role");
+        if (role instanceof String roleText && !roleText.isBlank()) {
+            return roleText;
+        }
+
+        Object roleName = user.get("role_name");
+        if (roleName instanceof String roleNameText && !roleNameText.isBlank()) {
+            return roleNameText;
+        }
+
+        Object roles = user.get("roles");
+        if (roles instanceof List<?> roleList && !roleList.isEmpty()) {
+            Object firstRole = roleList.get(0);
+            if (firstRole instanceof String firstRoleText && !firstRoleText.isBlank()) {
+                return firstRoleText;
+            }
+        }
+
+        return "Unknown";
+    }
 
 }
