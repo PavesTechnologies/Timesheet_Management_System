@@ -147,15 +147,24 @@ List<TimeSheetEntry> findByTimeSheetId(Long timeSheetId);
     List<RMSProjectHoursDTO> getProjectHoursForAllUsers(LocalDate startDate, LocalDate endDate);
 
     @Query("""
-    SELECT e.timeSheet.userId, SUM(e.hoursWorked)
-    FROM TimeSheetEntry e
-    WHERE e.projectId = :projectId
-    AND e.isBillable = true
-    AND e.timeSheet.status = :status
-    AND e.timeSheet.workDate BETWEEN :startDate AND :endDate
-    GROUP BY e.timeSheet.userId
+    SELECT t.id, t.userId, t.workDate, COALESCE(SUM(e.hoursWorked), 0), t.status
+    FROM TimeSheet t
+    LEFT JOIN TimeSheetEntry e ON e.timeSheet.id = t.id
+        AND e.projectId = :projectId
+        AND e.isBillable = true
+    WHERE t.status = :status
+      AND t.workDate BETWEEN :startDate AND :endDate
+      AND EXISTS (
+          SELECT 1
+          FROM TimeSheetEntry e2
+          WHERE e2.timeSheet.id = t.id
+            AND e2.projectId = :projectId
+            AND e2.isBillable = true
+      )
+    GROUP BY t.id, t.userId, t.workDate, t.status
+    ORDER BY t.workDate ASC, t.userId ASC
     """)
-    List<Object[]> findApprovedBillableHoursByProjectAndDateRange(
+    List<Object[]> findApprovedBillableTimesheetsByProjectAndDateRange(
             @Param("projectId") Long projectId,
             @Param("status") TimeSheet.Status status,
             @Param("startDate") LocalDate startDate,
