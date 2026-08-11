@@ -24,7 +24,7 @@ public class TimesheetSettingsController {
     private final TimesheetSettingsService settingsService;
 
     @GetMapping("/active")
-    @PreAuthorize("hasAuthority('TIMESHEET_ADMIN')")
+    @PreAuthorize("hasAuthority('TIMESHEET_ADMIN') OR hasAuthority('EDIT_TIMESHEET')")
     @Operation(summary = "Get the currently active timesheet hour settings (or defaults if none configured)")
     public ResponseEntity<?> getActive() {
         try {
