@@ -2,6 +2,8 @@ package com.intranet.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -37,6 +39,34 @@ public class TimesheetSettingsService {
 
     public TimesheetSettingsDTO getActiveAsDto() {
         return toDto(getActiveSettings());
+    }
+
+    /**
+     * The minimum a single day must reach, in the HH.MM literal convention:
+     * the weekend floor on Saturday/Sunday, the regular floor on any other day.
+     *
+     * This is the one definition of the rule — every write path that enforces a
+     * daily minimum (create, addEntries, updateEntries) reads it from here so a
+     * change in timesheet_settings takes effect everywhere at once.
+     */
+    public BigDecimal getMinHoursFor(LocalDate workDate) {
+        TimesheetSettings active = getActiveSettings();
+        return isWeekend(workDate) ? active.getMinHrsWeekend() : active.getMinHrsRegular();
+    }
+
+    /** The same floor as minutes, ready to compare against {@link TimeUtil#hhmmToMinutes}. */
+    public long getMinMinutesFor(LocalDate workDate) {
+        return TimeUtil.hhmmToMinutes(getMinHoursFor(workDate));
+    }
+
+    /** How the day is named in the "must be at least N hours for a ..." message. */
+    public static String dayLabel(LocalDate workDate) {
+        return isWeekend(workDate) ? "weekend day" : "regular day";
+    }
+
+    public static boolean isWeekend(LocalDate date) {
+        DayOfWeek day = date.getDayOfWeek();
+        return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
     }
 
     @Transactional
