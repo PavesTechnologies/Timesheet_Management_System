@@ -1,6 +1,7 @@
 package com.intranet.controller.external;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,12 +9,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.intranet.dto.UserDTO;
 import com.intranet.dto.external.ManagerWeeklySummaryDTO;
 import com.intranet.security.CurrentUser;
 import com.intranet.service.external.ManagerWeeklySummaryService;
+import com.intranet.util.MonthScope;
 
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,18 +31,24 @@ public class ManagerWeeklySummaryController {
     private final ManagerWeeklySummaryService managerWeeklySummaryService;
 
     @GetMapping("/manager")
-    @Operation(summary = "Get weekly submitted timesheets grouped by user for the manager")
+    @Operation(summary = "Get weekly submitted timesheets grouped by user for the manager",
+               description = "Defaults to the current calendar month. Pass month=1..12 (and optionally "
+                           + "year) to switch; only the current and previous calendar month are accepted.")
     @PreAuthorize("hasAuthority('APPROVE_TIMESHEET')")
     public ResponseEntity<List<ManagerWeeklySummaryDTO>> getSubmittedWeeklySummary(
             @CurrentUser UserDTO user,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) Integer year,
             HttpServletRequest request) {
 
         String authHeader = request.getHeader("Authorization");
-        // Step 0: Define current month's range
-        LocalDate now = LocalDate.now();
-        LocalDate startOfMonth = now.withDayOfMonth(1);
-        LocalDate endOfMonth = now.withDayOfMonth(now.lengthOfMonth());
-            List<ManagerWeeklySummaryDTO> summary =
+        // Step 0: Resolve the requested month — current by default, previous when asked for.
+        // Anything else is rejected by MonthScope (400 via TimesheetQueueScopeAdvice).
+        YearMonth scope = MonthScope.resolve(month, year);
+        LocalDate startOfMonth = scope.atDay(1);
+        LocalDate endOfMonth = scope.atEndOfMonth();
+
+        List<ManagerWeeklySummaryDTO> summary =
                 managerWeeklySummaryService.getWeeklySubmittedTimesheetsByManager(user.getId(), authHeader, startOfMonth, endOfMonth);
 
         return ResponseEntity.ok(summary);

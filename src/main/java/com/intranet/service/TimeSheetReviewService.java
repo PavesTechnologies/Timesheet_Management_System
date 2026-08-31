@@ -33,6 +33,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.intranet.util.MonthScope;
 import com.intranet.util.cache.UserDirectoryService;
 import com.intranet.dto.email.TimeSheetSummaryEmailDTO;
 import java.math.BigDecimal;
@@ -211,8 +212,13 @@ public class TimeSheetReviewService {
     }
 
 
-        if (weekInfo.getEndDate().isBefore(LocalDate.now().minusDays(30))) {
-            throw new IllegalArgumentException("Cannot review timesheets older than 30 days.");
+        // Only the current and previous calendar month remain open for review — the same
+        // window the approval queues can display (see MonthScope).
+        if (!MonthScope.isReviewable(weekInfo.getEndDate())) {
+            throw new IllegalArgumentException(String.format(
+                    "Cannot review the week ending %s. Reviews are limited to the current and "
+                            + "previous calendar month (%s).",
+                    weekInfo.getEndDate(), MonthScope.allowedRangeLabel()));
         }
 
         // ✅ Step 1: Fetch all projects once (to get managers)
@@ -513,9 +519,13 @@ public class TimeSheetReviewService {
                 && (dto.getComments() == null || dto.getComments().isBlank()))
             throw new IllegalArgumentException("Comments required when rejecting.");
 
-        // Cannot approve old weeks (> 30 days)
-        if (weekInfo.getEndDate().isBefore(LocalDate.now().minusDays(30))) {
-            throw new IllegalArgumentException("Cannot review timesheets older than 30 days.");
+        // Only the current and previous calendar month remain open for review — the same
+        // window the approval queues can display (see MonthScope).
+        if (!MonthScope.isReviewable(weekInfo.getEndDate())) {
+            throw new IllegalArgumentException(String.format(
+                    "Cannot review the week ending %s. Reviews are limited to the current and "
+                            + "previous calendar month (%s).",
+                    weekInfo.getEndDate(), MonthScope.allowedRangeLabel()));
         }
 
         Map<Long, List<InternalProject>> internalMap =

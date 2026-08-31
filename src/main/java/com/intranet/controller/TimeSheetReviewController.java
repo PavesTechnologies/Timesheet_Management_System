@@ -66,14 +66,22 @@ public class TimeSheetReviewController {
             @CurrentUser UserDTO manager,
             @RequestBody List<TimeSheetBulkReviewRequestDTO> dto) {
 
+        int processed = 0;
         try{
           for(TimeSheetBulkReviewRequestDTO ts : dto) {
               reviewService.reviewInternalTimesheets(manager.getId(), ts);
+              processed++;
           }
           return ResponseEntity.ok().body("Success");
         }
         catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body("Failed to submit timesheets");
+            // Each reviewInternalTimesheets call commits on its own, so report the real reason
+            // and how far the batch got rather than a bare "Failed to submit timesheets".
+            // Both approval tables already read err.response.data.message.
+            return ResponseEntity.badRequest().body(java.util.Map.of(
+                    "message", e.getMessage(),
+                    "processedBeforeFailure", processed,
+                    "totalRequested", dto.size()));
         }
     }
 
