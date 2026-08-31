@@ -64,6 +64,7 @@ public class TimeSheetService {
     private final TimeSheetEntryRepo entryRepository;
     private final HolidayExcludeUsersRepo holidayExcludeUsersRepository;
     private final TimeSheetOnHolidaysRepo timeSheetOnHolidaysRepository;
+    private final TimesheetSettingsService timesheetSettingsService;
 
     @Transactional
     public TimeSheet createTimeSheet(Long userId, LocalDate workDate, List<TimeSheetEntryCreateDTO> entriesDTO) {
@@ -140,6 +141,25 @@ public class TimeSheetService {
     return new BigDecimal(hhmm);
     }
 
+
+    /**
+     * A day's total must clear the minimum configured for that date. Reads the
+     * floor from timesheet_settings via TimesheetSettingsService so this matches
+     * what POST /create enforces — it used to be hard-coded at 8h here, which
+     * meant changing the setting only moved the create path.
+     */
+    private void assertMeetsMinimumHours(TimeSheet timeSheet, BigDecimal totalHours) {
+        LocalDate workDate = timeSheet.getWorkDate();
+        BigDecimal minHours = timesheetSettingsService.getMinHoursFor(workDate);
+
+        if (TimeUtil.hhmmToMinutes(totalHours) < TimeUtil.hhmmToMinutes(minHours)) {
+            throw new IllegalArgumentException(String.format(
+                    "Total working hours must be at least %s hours for a %s. Current total: %s.",
+                    minHours.toPlainString(),
+                    TimesheetSettingsService.dayLabel(workDate),
+                    totalHours.stripTrailingZeros().toPlainString()));
+        }
+    }
 
     private WeekInfo findOrCreateWeekInfo(LocalDate workDate) {
         return weekInfoRepository.findByStartDateLessThanEqualAndEndDateGreaterThanEqual(workDate, workDate)
@@ -230,11 +250,8 @@ public class TimeSheetService {
         // 4️⃣ Recalculate total hours from raw fromTime/toTime (correct HH.MM)
         BigDecimal totalHours = TimeUtil.sumEntryHours(timeSheet.getEntries());
 
-        // 5️⃣ Validate total hours (must be >= 8h00). Compare in minutes to avoid HH.MM-vs-decimal confusion.
-        if (TimeUtil.hhmmToMinutes(totalHours) < 8 * 60) {
-            throw new IllegalArgumentException("Total hours in timesheet must be at least 8. Current total: "
-                    + totalHours.stripTrailingZeros().toPlainString());
-        }
+        // 5️⃣ Validate against the configured daily minimum for this work date.
+        assertMeetsMinimumHours(timeSheet, totalHours);
 
         // 6️⃣ Save everything
         timeSheet.setHoursWorked(totalHours);
@@ -592,11 +609,8 @@ public class TimeSheetService {
         // 8️⃣ Recalculate total hours from raw fromTime/toTime (correct HH.MM)
         totalHours = TimeUtil.sumEntryHours(timeSheet.getEntries());
 
-        // 9️⃣ Validate minimum total hours (must be >= 8h00). Compare in minutes to avoid HH.MM-vs-decimal confusion.
-        if (TimeUtil.hhmmToMinutes(totalHours) < 8 * 60) {
-            throw new IllegalArgumentException("Total hours in the timesheet must be at least 8. Current total: "
-                    + totalHours.stripTrailingZeros().toPlainString() + " hours.");
-        }
+        // 9️⃣ Validate against the configured daily minimum for this work date.
+        assertMeetsMinimumHours(timeSheet, totalHours);
 
         // 9️⃣ Update the timesheet summary
         timeSheet.setHoursWorked(totalHours);
