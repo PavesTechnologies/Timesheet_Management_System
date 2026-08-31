@@ -24,7 +24,6 @@ import com.intranet.repository.HolidayExcludeUsersRepo;
 import com.intranet.repository.WeekInfoRepo;
 import com.intranet.repository.WeeklyTimeSheetReviewRepo;
 import com.intranet.dto.UserDTO;
-import com.intranet.entity.TimesheetSettings;
 import com.intranet.security.CurrentUser;
 import com.intranet.service.TimeSheetService;
 import com.intranet.service.TimesheetSettingsService;
@@ -93,26 +92,6 @@ public class TimeSheetController {
 
     @Value("${lms.api.base-url}")
     private String lmsBaseUrl;
-
-    private int convertToMinutes(BigDecimal hhmm) {
-    if (hhmm == null) return 0;
-    String[] parts = hhmm.toPlainString().split("\\.");
-    int hours = Integer.parseInt(parts[0]);
-    int minutes = 0;
-    if (parts.length > 1) {
-        String minPart = parts[1];
-        // Pad single digits (e.g. .5 -> .50)
-        if (minPart.length() == 1) minPart += "0";
-        minutes = Integer.parseInt(minPart);
-        // Normalize incorrect formats like "6.67" → 6h + 67min = 7h 07min
-        if (minutes >= 60) {
-            hours += minutes / 60;
-            minutes = minutes % 60;
-        }
-    }
-    return hours * 60 + minutes;
-    }
-
 
     @PostMapping("/create")
     @Operation(summary = "Submit a new timesheet")
@@ -205,20 +184,12 @@ public class TimeSheetController {
                 .collect(Collectors.toList())
         );
 
-        TimesheetSettings hourSettings = timesheetSettingsService.getActiveSettings();
-        boolean isWeekend = workDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
-                || workDate.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
-        BigDecimal minHours = isWeekend
-                ? hourSettings.getMinHrsWeekend()
-                : hourSettings.getMinHrsRegular();
-
-        int totalMinutes = convertToMinutes(totalWorked);
-        int requiredMinutes = convertToMinutes(minHours);
-        if (totalMinutes < requiredMinutes) {
+        BigDecimal minHours = timesheetSettingsService.getMinHoursFor(workDate);
+        if (TimeUtil.hhmmToMinutes(totalWorked) < TimeUtil.hhmmToMinutes(minHours)) {
             return ResponseEntity.badRequest().body(String.format(
                 "Total working hours must be at least %s hours for a %s.",
                 minHours.toPlainString(),
-                isWeekend ? "weekend day" : "regular day"
+                TimesheetSettingsService.dayLabel(workDate)
             ));
         }
 
