@@ -339,8 +339,14 @@ public class HolidayExcludeUsersService {
     for (Map<String, Object> leave : leaveData) {
         // extract fields safely
         String status = leave.get("status") != null ? leave.get("status").toString() : "";
-        if (!"APPROVED".equalsIgnoreCase(status)) {
-            // only approved leaves
+        // A leave blocks timesheet entry when it is APPROVED *or* still awaiting a
+        // decision (PENDING) — the day is spoken for either way. Any other status
+        // (REJECTED, CANCELLED) leaves the day open to log time as normal.
+        boolean isApprovedLeave = "APPROVED".equalsIgnoreCase(status);
+        boolean isPendingLeave = "PENDING".equalsIgnoreCase(status);
+        boolean blocksEntry = isApprovedLeave || isPendingLeave;
+
+        if (!blocksEntry) {
             continue;
         }
 
@@ -385,7 +391,9 @@ public class HolidayExcludeUsersService {
             // Construct HolidayDTO for the leave date
             HolidayDTO dto = new HolidayDTO();
             dto.setHolidayId(0L); // generated
-            dto.setHolidayName("Leave Day");
+            // The name is what the UI shows in its "timesheet not allowed" message, so
+            // spell out that an undecided leave is the reason.
+            dto.setHolidayName(isApprovedLeave ? "Leave Day" : "Leave Day (Pending Approval)");
             dto.setHolidayDate(d);
             dto.setHolidayDescription(reason);
             dto.setType("LEAVE");
@@ -399,7 +407,10 @@ public class HolidayExcludeUsersService {
             dto.setSubmitTimesheet(isExcluded);
 
             // timeSheetReviews -> Leave Approved or Leave Pending
-            dto.setTimeSheetReviews("APPROVED".equalsIgnoreCase(status) ? "Leave Approved" : "Leave Pending");
+            dto.setTimeSheetReviews(isApprovedLeave ? "Leave Approved" : "Leave Pending");
+            // Downstream (weekly submission) must tell the two apart: only an APPROVED
+            // leave may be auto-credited with leave hours.
+            dto.setLeaveStatus(isApprovedLeave ? "APPROVED" : "PENDING");
 
             // If approving manager present, add to allowedManagers for this date
             if (approvingManager != null) {
