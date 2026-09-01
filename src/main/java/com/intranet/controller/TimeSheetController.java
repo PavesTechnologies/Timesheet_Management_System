@@ -123,7 +123,7 @@ public class TimeSheetController {
 
         // 🔹 Step 1.2: Validate that the week is not approved
         Optional<WeekInfo> optionalWeekInfo = weekInfoRepo
-                .findByStartDateLessThanEqualAndEndDateGreaterThanEqual(workDate, workDate);
+                .findFirstByStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(workDate, workDate);
 
         if (optionalWeekInfo.isPresent()) {
             WeekInfo weekInfo = optionalWeekInfo.get();

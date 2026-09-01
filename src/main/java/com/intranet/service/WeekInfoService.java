@@ -36,7 +36,11 @@ public class WeekInfoService {
 
         int weekNo = 1;
 
-        while (currentStart.isBefore(lastDayOfMonth.plusDays(1)) && weekNo <= 5) {
+        // No week cap: a month spans 6 calendar weeks whenever it starts late in the week
+        // (e.g. Aug 2026 starts on a Saturday and needs 6 rows). Capping at 5 left the
+        // last day of such months with no week row at all, which then made
+        // TimeSheetService's fallback invent an unclamped, overlapping week.
+        while (currentStart.isBefore(lastDayOfMonth.plusDays(1))) {
             LocalDate currentEnd = currentStart.plusDays(6);
 
             // Boundaries (clamped to the month)

@@ -15,7 +15,15 @@ import com.intranet.entity.WeekInfo;
 public interface WeekInfoRepo extends JpaRepository<WeekInfo, Long>{
 
     Optional<WeekInfo> findByStartDateAndEndDate(LocalDate startDate, LocalDate endDate);
-    Optional<WeekInfo> findByStartDateLessThanEqualAndEndDateGreaterThanEqual(LocalDate startDate, LocalDate endDate);
+    /**
+     * The week covering a single date. Deliberately findFirst..OrderByStartDateDesc rather
+     * than a plain Optional finder: legacy rows can overlap (a pre-fix fallback week could
+     * spill across a month boundary), and a plain Optional finder throws
+     * NonUniqueResultException -> HTTP 500 the moment two rows match. Ordering by start date
+     * descending picks the later-starting, month-clamped row, which is the correct one.
+     */
+    Optional<WeekInfo> findFirstByStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(
+        LocalDate startDate, LocalDate endDate);
     List<WeekInfo> findByStartDateGreaterThanEqualAndEndDateLessThanEqualOrderByStartDateAsc(LocalDate start, LocalDate end);
     List<WeekInfo> findByStartDateBetween(LocalDate startDate, LocalDate endDate);
     List<WeekInfo> findByMonthAndYear(Integer month, Integer year);
