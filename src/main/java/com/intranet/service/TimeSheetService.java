@@ -162,7 +162,7 @@ public class TimeSheetService {
     }
 
     private WeekInfo findOrCreateWeekInfo(LocalDate workDate) {
-        return weekInfoRepository.findByStartDateLessThanEqualAndEndDateGreaterThanEqual(workDate, workDate)
+        return weekInfoRepository.findFirstByStartDateLessThanEqualAndEndDateGreaterThanEqualOrderByStartDateDesc(workDate, workDate)
                 .orElseGet(() -> createWeekInfo(workDate));
     }
 
@@ -170,13 +170,22 @@ public class TimeSheetService {
         LocalDate startOfWeek = date.with(java.time.DayOfWeek.MONDAY);
         LocalDate endOfWeek = date.with(java.time.DayOfWeek.SUNDAY);
 
+        // Clamp to the month, exactly as WeekInfoService.generateWeeksForMonth does.
+        // Without this, a Monday that falls on the last day of a month produced a week
+        // spilling into the next month, which then overlapped that month's own generated
+        // week and made the "which week covers this date?" lookup return two rows.
+        LocalDate monthStart = date.withDayOfMonth(1);
+        LocalDate monthEnd = date.withDayOfMonth(date.lengthOfMonth());
+        LocalDate effectiveStart = startOfWeek.isBefore(monthStart) ? monthStart : startOfWeek;
+        LocalDate effectiveEnd = endOfWeek.isAfter(monthEnd) ? monthEnd : endOfWeek;
+
         WeekInfo weekInfo = new WeekInfo();
-        weekInfo.setStartDate(startOfWeek);
-        weekInfo.setEndDate(endOfWeek);
-        weekInfo.setWeekNo(startOfWeek.get(WeekFields.ISO.weekOfYear()));
-        weekInfo.setYear(startOfWeek.getYear());
-        weekInfo.setMonth(startOfWeek.getMonthValue());
-        weekInfo.setIncompleteWeek(false);
+        weekInfo.setStartDate(effectiveStart);
+        weekInfo.setEndDate(effectiveEnd);
+        weekInfo.setWeekNo(effectiveStart.get(WeekFields.ISO.weekOfYear()));
+        weekInfo.setYear(effectiveStart.getYear());
+        weekInfo.setMonth(effectiveStart.getMonthValue());
+        weekInfo.setIncompleteWeek(!effectiveStart.equals(startOfWeek) || !effectiveEnd.equals(endOfWeek));
 
         return weekInfoRepository.save(weekInfo);
     }
