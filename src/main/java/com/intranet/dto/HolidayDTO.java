@@ -19,6 +19,12 @@ public class HolidayDTO {
     public boolean  isLeave;
     private boolean submitTimesheet;
     private String timeSheetReviews;
+    /**
+     * For LEAVE entries: the raw LMS status, APPROVED or PENDING. Null for public
+     * holidays and weekends. Only these two statuses ever reach here — a REJECTED or
+     * CANCELLED leave leaves the day open, so it produces no entry at all.
+     */
+    private String leaveStatus;
     private List<ManagerInfoDTO> allowedManagers; // ✅ new field
 
 }
