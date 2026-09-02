@@ -1,18 +1,15 @@
 package com.intranet.service.FinanceReportEmail;
 
-import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
-import org.springframework.stereotype.Service;
+import com.intranet.util.mail.MailTransport;
 
-import jakarta.mail.internet.MimeMessage;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 public class FinancialPdfEmailSender {
 
-    private final JavaMailSender mailSender;
+    private final MailTransport mailTransport;
 
     public void sendFinancialReportPdf(
             String toEmail,
@@ -22,21 +19,14 @@ public class FinancialPdfEmailSender {
             String senderName
     ) throws Exception {
 
-        MimeMessage message = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true);
+        String subject = "Monthly Financial Report - " + monthName + " " + year;
 
-        helper.setTo(toEmail);
-        helper.setSubject("Monthly Financial Report - " + monthName + " " + year);
-
-        helper.setText(
-                "Hi " + senderName + ",\n\n" +
+        String body = "Hi " + senderName + ",\n\n" +
                 "Your monthly financial report is attached.\n\n" +
-                "Regards,\nTimesheet Management System"
-        );
+                "Regards,\nTimesheet Management System";
 
-        helper.addAttachment("Financial_Report_" + monthName + "_" + year + ".pdf",
-                new ByteArrayResource(pdfBytes));
+        String fileName = "Financial_Report_" + monthName + "_" + year + ".pdf";
 
-        mailSender.send(message);
+        mailTransport.send(toEmail, subject, body, false, fileName, pdfBytes);
     }
 }

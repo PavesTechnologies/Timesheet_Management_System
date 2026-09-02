@@ -1,30 +1,23 @@
 package com.intranet.service.MonthReportEmailSend;
 
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
-import org.springframework.stereotype.Service;
+import com.intranet.util.mail.MailTransport;
 
-import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 public class EmailPdfSenderService {
 
-    private final JavaMailSender mailSender;
+    private final MailTransport mailTransport;
 
     public void sendPdfReport(String toEmail, byte[] pdfBytes, String employeeName) throws Exception {
 
-        MimeMessage message = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true);
+        String subject = "Monthly Timesheet PDF Report - " + employeeName;
 
-        helper.setTo(toEmail);
-        helper.setSubject("Monthly Timesheet PDF Report - " + employeeName);
-        helper.setText("Hi,\n\nPlease find attached your monthly timesheet report.\n\nRegards,\nTimesheet Management System");
+        String body = "Hi,\n\nPlease find attached your monthly timesheet report.\n\n"
+                + "Regards,\nTimesheet Management System";
 
-        helper.addAttachment("Monthly_Report.pdf", new ByteArrayResource(pdfBytes));
-
-        mailSender.send(message);
+        mailTransport.send(toEmail, subject, body, false, "Monthly_Report.pdf", pdfBytes);
     }
 }
