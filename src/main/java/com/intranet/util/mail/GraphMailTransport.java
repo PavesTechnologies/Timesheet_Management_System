@@ -14,9 +14,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriUtils;
+import org.springframework.web.util.UriComponentsBuilder;
 
-import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -100,11 +100,17 @@ public class GraphMailTransport implements MailTransport {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(tokenProvider.getAccessToken());
 
-        String url = trimTrailingSlash(graphBaseUrl) + "/users/"
-                + UriUtils.encodePathSegment(senderAddress, StandardCharsets.UTF_8) + "/sendMail";
+        // Build a URI rather than handing RestTemplate a String: a String is treated as a URI
+        // template, which would encode the address a second time and would also try to expand
+        // any braces in it.
+        URI uri = UriComponentsBuilder.fromUriString(trimTrailingSlash(graphBaseUrl))
+                .pathSegment("users", senderAddress, "sendMail")
+                .encode()
+                .build()
+                .toUri();
 
         try {
-            restTemplate.postForEntity(url, new HttpEntity<>(payload, headers), Void.class);
+            restTemplate.postForEntity(uri, new HttpEntity<>(payload, headers), Void.class);
             log.debug("Graph mail sent to {} with subject '{}'", to, subject);
         } catch (RestClientException e) {
             throw new MessagingException(
