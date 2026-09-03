@@ -326,6 +326,43 @@ public class TimeSheetService {
     return new HttpEntity<>(headers);
     }
     
+    /**
+     * True when PMS reports this project as COMPLETED, i.e. closed for new time entries.
+     *
+     * <p>Fails <b>open</b>: if PMS cannot be reached, or returns no status, the project stays
+     * selectable. Hiding a project on a failed lookup would silently block someone from
+     * logging any time at all, which is far worse than allowing an entry on a project that
+     * happens to have just closed.
+     *
+     * <p>Only ever called for PMS project ids. Internal activities carry synthetic ids
+     * (negative or zero) and are skipped outright.
+     */
+    private boolean isCompletedInPms(Long projectId) {
+        if (projectId == null || projectId <= 0) {
+            return false;
+        }
+        try {
+            String url = String.format("%s/projects/%d", pmsBaseUrl, projectId);
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    url, HttpMethod.GET, buildEntityWithAuth(),
+                    new ParameterizedTypeReference<Map<String, Object>>() {});
+
+            Map<String, Object> body = response.getBody();
+            Object status = body != null ? body.get("status") : null;
+            boolean completed = status != null && "COMPLETED".equalsIgnoreCase(status.toString().trim());
+
+            if (completed) {
+                log.debug("Project {} is COMPLETED in PMS - excluded from the timesheet picker", projectId);
+            }
+            return completed;
+
+        } catch (Exception ex) {
+            log.warn("PMS status check failed for projectId={}, keeping it selectable. Reason: {}",
+                    projectId, ex.getMessage());
+            return false;
+        }
+    }
+
     public List<ProjectTaskView> getUserTaskView(Long userId) {
         // 🔹 Step 1+2: Try to fetch & group PMS tasks. On ANY failure, fall back to internal-only.
         Map<Long, ProjectTaskView> projectMap = new LinkedHashMap<>();
@@ -381,6 +418,12 @@ public class TimeSheetService {
             log.warn("PMS task fetch failed for userId={}, returning internal projects only. Reason: {}",
                     userId, ex.getMessage());
         }
+
+        // 🔹 Step 2.1: Drop projects PMS has closed — a COMPLETED project must not
+        // accept new time. Checked once per distinct project (projectMap is keyed by id),
+        // never per task. Internal activities are added in Step 3 below and are never
+        // PMS-managed, so they are untouched by this.
+        projectMap.keySet().removeIf(this::isCompletedInPms);
 
         // 🔹 Step 3: Fetch Internal Projects from DB
         List<InternalProject> internalProjects = internalProjectRepository.findAll();
