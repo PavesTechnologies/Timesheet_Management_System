@@ -427,7 +427,7 @@ public class TimeSheetReviewService {
 
                 BigDecimal totalHours = userSheets.stream()
                         .map(ts -> ts.getHoursWorked() != null ? ts.getHoursWorked() : BigDecimal.ZERO)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
                 TimeSheetSummaryEmailDTO emailDTO = new TimeSheetSummaryEmailDTO();
                 emailDTO.setUserId(userId);

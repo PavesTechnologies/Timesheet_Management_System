@@ -1,5 +1,7 @@
 package com.intranet.service.utilization;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.ProjectUtilizationDTO;
 import com.intranet.dto.rms.UtilizationPageResponseDTO;
 import com.intranet.entity.InternalProject;
@@ -125,7 +127,7 @@ public class ProjectUtilizationService {
             Set<Long> uniqueResourceIds = projectSheets.stream()
                     .map(TimeSheet::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
             BigDecimal avgHoursPerResource = uniqueResourceIds.isEmpty() ? BigDecimal.ZERO
-                    : totalHours.divide(BigDecimal.valueOf(uniqueResourceIds.size()), 2, RoundingMode.HALF_UP);
+                    : TimeUtil.divideHours(totalHours, uniqueResourceIds.size());
 
             boolean overUtil = UtilizationCalculationUtils.isConsistentlyOverUtilized(projectSheets, overThreshold);
             boolean underUtil = UtilizationCalculationUtils.isConsistentlyUnderUtilized(projectSheets, underThreshold);

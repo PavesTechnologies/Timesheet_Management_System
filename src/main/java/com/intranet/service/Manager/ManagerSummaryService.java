@@ -1,5 +1,7 @@
 package com.intranet.service.Manager;
 
+import com.intranet.service.TimeUtil;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
@@ -139,8 +141,7 @@ public class ManagerSummaryService {
 
         double billablePercent = BigDecimal.ZERO.equals(totalHours)
                 ? 0.0
-                : billableHours.divide(totalHours, 2, RoundingMode.HALF_UP)
-                        .multiply(BigDecimal.valueOf(100)).doubleValue();
+                : TimeUtil.percentOfHoursScaled(billableHours, totalHours).doubleValue();
 
         // ------------------------------
         // 4️⃣ Pending Approvals
@@ -150,7 +151,8 @@ public class ManagerSummaryService {
         // ------------------------------
         // 5️⃣ Missing Timesheets
         // ------------------------------
-        List<Map<String, Object>> missing = computeMissing(memberIds, managerId, nameCache, emailCache);
+        List<Map<String, Object>> missing =
+                computeMissing(memberIds, managerId, nameCache, emailCache, startDate, endDate);
 
         // ------------------------------
         // 6️⃣ Weekly Summary
@@ -278,16 +280,32 @@ public class ManagerSummaryService {
             Set<Long> users,
             Long managerId,
             Map<Long, String> names,
-            Map<Long, String> emails) {
+            Map<Long, String> emails,
+            LocalDate startDate,
+            LocalDate endDate) {
 
         List<Map<String, Object>> list = new ArrayList<>();
 
         LocalDate today = LocalDate.now();
-        LocalDate monthStart = today.withDayOfMonth(1);
-        LocalDate from = today.getDayOfMonth() < 15 ? monthStart : today.minusDays(15);
+
+        // Never look past today: a week that has not happened yet is not "missing".
+        LocalDate to = endDate.isAfter(today) ? today : endDate;
+
+        // For the month still in progress keep the original rolling window (the last 15
+        // days, or the month start before the 15th). A month that has already closed is
+        // assessed in full, so switching the toggle to it reports that whole month.
+        LocalDate from = startDate;
+        if (endDate.isAfter(today)) {
+            LocalDate rolling = today.minusDays(15);
+            from = rolling.isAfter(startDate) ? rolling : startDate;
+        }
+
+        if (to.isBefore(from)) {
+            return list;
+        }
 
         Set<Long> active = weeklyReviewRepo
-                .findByUserIdInAndWeekInfo_StartDateBetween(users, from, today)
+                .findByUserIdInAndWeekInfo_StartDateBetween(users, from, to)
                 .stream()
                 .map(WeeklyTimeSheetReview::getUserId)
                 .collect(Collectors.toSet());

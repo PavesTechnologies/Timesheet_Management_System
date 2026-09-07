@@ -42,6 +42,56 @@ public class TimeUtil {
         return h * 60 + m;
     }
 
+    /**
+     * Add two HH.MM literals with proper minute roll-over: 0.30 + 0.30 = 1.00, not 0.60.
+     *
+     * <p>Drop-in replacement for {@code BigDecimal::add} wherever the operands are hours,
+     * so an existing {@code reduce(BigDecimal.ZERO, BigDecimal::add)} becomes
+     * {@code reduce(BigDecimal.ZERO, TimeUtil::addHours)} without restructuring the stream.
+     */
+    public static BigDecimal addHours(BigDecimal a, BigDecimal b) {
+        return minutesToHHMM(hhmmToMinutes(a) + hhmmToMinutes(b));
+    }
+
+    /** Subtract HH.MM literals, floored at zero. */
+    public static BigDecimal subtractHours(BigDecimal a, BigDecimal b) {
+        return minutesToHHMM(Math.max(0, hhmmToMinutes(a) - hhmmToMinutes(b)));
+    }
+
+    /**
+     * a / b as a percentage, computed in minutes. Dividing HH.MM literals directly reads
+     * 7.30 as 7.3 and skews the result.
+     */
+    public static double percentOfHours(BigDecimal part, BigDecimal whole) {
+        long wholeMinutes = hhmmToMinutes(whole);
+        if (wholeMinutes == 0) return 0.0;
+        return hhmmToMinutes(part) * 100.0 / wholeMinutes;
+    }
+
+    /**
+     * Divide an HH.MM literal by a plain count, in minutes. Dividing the literal directly
+     * produces impossible times: 7.30 / 2 = 3.65, i.e. 3h65m. This returns 3.45.
+     */
+    public static BigDecimal divideHours(BigDecimal hours, long divisor) {
+        if (divisor == 0) return BigDecimal.ZERO;
+        return minutesToHHMM(Math.round(hhmmToMinutes(hours) / (double) divisor));
+    }
+
+    /** {@link #percentOfHours} as a 2dp BigDecimal, for callers that return one. */
+    public static BigDecimal percentOfHoursScaled(BigDecimal part, BigDecimal whole) {
+        return BigDecimal.valueOf(percentOfHours(part, whole)).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * HH.MM literal from a raw SUM(minutes) coming back from JPQL. Null-safe, and rounds
+     * rather than truncating: the driver may hand back a Double or an unscaled DECIMAL, and
+     * longValue() on 1919.9999 would silently drop a minute.
+     */
+    public static BigDecimal minutesResultToHHMM(Object minutes) {
+        if (minutes == null) return BigDecimal.ZERO.setScale(2);
+        return minutesToHHMM(Math.round(((Number) minutes).doubleValue()));
+    }
+
     // Sum a list of HH.MM BigDecimals with proper minute roll-over.
     public static BigDecimal sumHours(List<BigDecimal> hoursList) {
         long totalMinutes = 0;
