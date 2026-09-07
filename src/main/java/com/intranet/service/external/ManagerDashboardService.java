@@ -1,5 +1,7 @@
 package com.intranet.service.external;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.entity.*;
 import com.intranet.repository.*;
 
@@ -81,9 +83,7 @@ public class ManagerDashboardService {
         // -----------------------------
         BigDecimal totalHours = BigDecimal.valueOf(320);
         BigDecimal billableHours = BigDecimal.valueOf(260);
-        BigDecimal billablePercentage = billableHours
-                .multiply(BigDecimal.valueOf(100))
-                .divide(totalHours, 2, BigDecimal.ROUND_HALF_UP);
+        BigDecimal billablePercentage = TimeUtil.percentOfHoursScaled(billableHours, totalHours);
 
         List<Map<String, Object>> weeklySummary = Collections.emptyList();
 

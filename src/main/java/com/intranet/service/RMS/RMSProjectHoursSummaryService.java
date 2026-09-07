@@ -1,5 +1,7 @@
 package com.intranet.service.RMS;
 
+import com.intranet.service.TimeUtil;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
@@ -188,16 +190,15 @@ public class RMSProjectHoursSummaryService {
                 .map(TimeSheetEntry::getHoursWorked)
                 .toList());
 
-        BigDecimal actualHours = billableHours.add(nonBillableHours);
+        BigDecimal actualHours = TimeUtil.addHours(billableHours, nonBillableHours);
         LocalDate startDate = firstLocalDate(projectInfo, START_DATE_KEYS);
         LocalDate endDate = firstLocalDate(projectInfo, END_DATE_KEYS);
         BigDecimal plannedHours = resolvePlannedHours(projectInfo, projectEntries, startDate, endDate);
         BigDecimal pendingHours = plannedHours.compareTo(BigDecimal.ZERO) > 0
-                ? plannedHours.subtract(actualHours).max(BigDecimal.ZERO)
+                ? TimeUtil.subtractHours(plannedHours, actualHours)
                 : BigDecimal.ZERO;
         BigDecimal utilizationPercentage = plannedHours.compareTo(BigDecimal.ZERO) > 0
-                ? actualHours.multiply(BigDecimal.valueOf(100))
-                        .divide(plannedHours, 2, RoundingMode.HALF_UP)
+                ? TimeUtil.percentOfHoursScaled(actualHours, plannedHours)
                 : BigDecimal.ZERO;
 
         RMSProjectHoursDetailDTO dto = new RMSProjectHoursDetailDTO();
@@ -252,7 +253,7 @@ public class RMSProjectHoursSummaryService {
             dto.setResourceEmail(extractString(memberInfo, "email", null));
             dto.setBillableHours(billableHours);
             dto.setNonBillableHours(nonBillableHours);
-            dto.setActualHours(billableHours.add(nonBillableHours));
+            dto.setActualHours(TimeUtil.addHours(billableHours, nonBillableHours));
             resources.add(dto);
         }
 
@@ -304,7 +305,7 @@ public class RMSProjectHoursSummaryService {
                     dto.setTaskName(taskNames.getOrDefault(taskId, "Unknown Internal Task"));
                     dto.setBillableHours(billableHours);
                     dto.setNonBillableHours(nonBillableHours);
-                    dto.setActualHours(billableHours.add(nonBillableHours));
+                    dto.setActualHours(TimeUtil.addHours(billableHours, nonBillableHours));
                     dto.setResources(buildResources(null, taskEntries, userDirectory));
                     return dto;
                 })
@@ -400,7 +401,7 @@ public class RMSProjectHoursSummaryService {
                     dto.setBillable(resolveTaskBillable(taskEntries, pmsTasks.get(taskId), internalTaskMap.get(taskId)));
                     dto.setBillableHours(billableHours);
                     dto.setNonBillableHours(nonBillableHours);
-                    dto.setActualHours(billableHours.add(nonBillableHours));
+                    dto.setActualHours(TimeUtil.addHours(billableHours, nonBillableHours));
                     dto.setResources(buildResources(null, taskEntries, userDirectory));
                     return dto;
                 })
@@ -674,7 +675,7 @@ public class RMSProjectHoursSummaryService {
     private BigDecimal sum(List<BigDecimal> values) {
         return values.stream()
                 .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours)
                 .setScale(2, RoundingMode.HALF_UP);
     }
 

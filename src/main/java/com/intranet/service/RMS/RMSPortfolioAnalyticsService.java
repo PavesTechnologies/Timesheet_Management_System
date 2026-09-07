@@ -1,5 +1,7 @@
 package com.intranet.service.RMS;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.AlertDTO;
 import com.intranet.dto.rms.RMSPortfolioAnalyticsResponseDTO;
 import com.intranet.dto.rms.ResourceSummaryDTO;
@@ -94,6 +96,6 @@ public class RMSPortfolioAnalyticsService {
                            java.util.function.Function<ResourceSummaryDTO, BigDecimal> getter) {
         return resources.stream()
                 .map(r -> RMSCalculationUtils.safe(getter.apply(r)))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
     }
 }

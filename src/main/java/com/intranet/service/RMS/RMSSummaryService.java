@@ -1,5 +1,7 @@
 package com.intranet.service.RMS;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.KPIStatDTO;
 import com.intranet.dto.rms.RMSOrgSummaryResponseDTO;
 import com.intranet.dto.rms.RMSProjectHoursDTO;
@@ -61,9 +63,8 @@ public class RMSSummaryService {
         BigDecimal internalHours = projectHours.stream()
                 .filter(p -> p.getProjectId() != null && internalProjectIds.contains(p.getProjectId()))
                 .map(RMSProjectHoursDTO::getHours)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal otherNonBillableHours = nonBillableHours.subtract(internalHours)
-                .max(BigDecimal.ZERO);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
+        BigDecimal otherNonBillableHours = TimeUtil.subtractHours(nonBillableHours, internalHours);
 
         // 4. Load timesheet headers only (no entries) for holidays + confidence score
         List<TimeSheet> timeSheets = timeSheetRepository.findByWorkDateBetween(startDate, endDate);
@@ -90,20 +91,17 @@ public class RMSSummaryService {
 
         // 5. Averages
         BigDecimal avgDivisor = totalUsers > 0 ? BigDecimal.valueOf(totalUsers) : BigDecimal.ONE;
-        BigDecimal avgTotal = totalHours.divide(avgDivisor, 2, RoundingMode.HALF_UP);
-        BigDecimal avgBillable = billableHours.divide(avgDivisor, 2, RoundingMode.HALF_UP);
-        BigDecimal avgNonBillable = nonBillableHours.divide(avgDivisor, 2, RoundingMode.HALF_UP);
+        BigDecimal avgTotal = TimeUtil.divideHours(totalHours, avgDivisor.longValue());
+        BigDecimal avgBillable = TimeUtil.divideHours(billableHours, avgDivisor.longValue());
+        BigDecimal avgNonBillable = TimeUtil.divideHours(nonBillableHours, avgDivisor.longValue());
 
         // 6. Percentage breakdown
         double billablePct = totalHours.compareTo(BigDecimal.ZERO) == 0 ? 0.0
-                : billableHours.multiply(BigDecimal.valueOf(100))
-                        .divide(totalHours, 2, RoundingMode.HALF_UP).doubleValue();
+                : TimeUtil.percentOfHoursScaled(billableHours, totalHours).doubleValue();
         double internalPct = totalHours.compareTo(BigDecimal.ZERO) == 0 ? 0.0
-                : internalHours.multiply(BigDecimal.valueOf(100))
-                        .divide(totalHours, 2, RoundingMode.HALF_UP).doubleValue();
+                : TimeUtil.percentOfHoursScaled(internalHours, totalHours).doubleValue();
         double otherNonBillablePct = totalHours.compareTo(BigDecimal.ZERO) == 0 ? 0.0
-                : otherNonBillableHours.multiply(BigDecimal.valueOf(100))
-                        .divide(totalHours, 2, RoundingMode.HALF_UP).doubleValue();
+                : TimeUtil.percentOfHoursScaled(otherNonBillableHours, totalHours).doubleValue();
 
         // 7. KPI cards
         List<KPIStatDTO> kpiStats = List.of(
