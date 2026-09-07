@@ -1,5 +1,7 @@
 package com.intranet.service.utilization;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.RoleUtilizationDTO;
 import com.intranet.dto.rms.UtilizationPageResponseDTO;
 import com.intranet.entity.InternalProject;
@@ -130,7 +132,7 @@ public class RoleUtilizationService {
             int confidence = UtilizationCalculationUtils.calculateConfidenceScore(roleSheets);
 
             BigDecimal avgHoursPerResource = uniqueResources == 0 ? BigDecimal.ZERO
-                    : totalHours.divide(BigDecimal.valueOf(uniqueResources), 2, RoundingMode.HALF_UP);
+                    : TimeUtil.divideHours(totalHours, uniqueResources);
 
             boolean overUtil = UtilizationCalculationUtils.isConsistentlyOverUtilized(roleSheets, overThreshold);
             boolean underUtil = UtilizationCalculationUtils.isConsistentlyUnderUtilized(roleSheets, underThreshold);

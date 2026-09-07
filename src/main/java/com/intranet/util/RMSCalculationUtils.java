@@ -1,5 +1,7 @@
 package com.intranet.util;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.AlertDTO;
 import com.intranet.dto.rms.PortfolioTrendDTO;
 import com.intranet.entity.TimeSheet;
@@ -54,11 +56,11 @@ public final class RMSCalculationUtils {
         BigDecimal approved = timeSheets.stream()
                 .filter(ts -> ts.getStatus() == TimeSheet.Status.APPROVED)
                 .map(ts -> safe(ts.getHoursWorked()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
         BigDecimal draft = timeSheets.stream()
                 .filter(ts -> ts.getStatus() == TimeSheet.Status.DRAFT)
                 .map(ts -> safe(ts.getHoursWorked()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
         BigDecimal total = approved.add(draft);
         if (total.compareTo(BigDecimal.ZERO) == 0) return 50;
         return approved.multiply(BigDecimal.valueOf(100))
@@ -70,7 +72,7 @@ public final class RMSCalculationUtils {
         return entries.stream()
                 .filter(predicate)
                 .map(e -> safe(e.getHoursWorked()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
     }
 
     public static Map<LocalDate, BigDecimal> buildActualByDate(List<TimeSheetEntry> entries) {
@@ -80,7 +82,7 @@ public final class RMSCalculationUtils {
                         e -> e.getTimeSheet().getWorkDate(),
                         Collectors.mapping(
                                 e -> safe(e.getHoursWorked()),
-                                Collectors.reducing(BigDecimal.ZERO, BigDecimal::add)
+                                Collectors.reducing(BigDecimal.ZERO, TimeUtil::addHours)
                         )
                 ));
     }
@@ -130,9 +132,9 @@ public final class RMSCalculationUtils {
         LocalDate cursor = startDate;
         while (!cursor.isAfter(endDate)) {
             LocalDate weekKey = cursor.with(DayOfWeek.MONDAY);
-            actualByWeek.merge(weekKey, actualByDate.getOrDefault(cursor, BigDecimal.ZERO), BigDecimal::add);
+            actualByWeek.merge(weekKey, actualByDate.getOrDefault(cursor, BigDecimal.ZERO), TimeUtil::addHours);
             plannedByWeek.merge(weekKey,
-                    BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0)), BigDecimal::add);
+                    BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0)), TimeUtil::addHours);
             cursor = cursor.plusDays(1);
         }
         return actualByWeek.entrySet().stream()
@@ -158,9 +160,9 @@ public final class RMSCalculationUtils {
         LocalDate cursor = startDate;
         while (!cursor.isAfter(endDate)) {
             YearMonth monthKey = YearMonth.from(cursor);
-            actualByMonth.merge(monthKey, actualByDate.getOrDefault(cursor, BigDecimal.ZERO), BigDecimal::add);
+            actualByMonth.merge(monthKey, actualByDate.getOrDefault(cursor, BigDecimal.ZERO), TimeUtil::addHours);
             plannedByMonth.merge(monthKey,
-                    BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0)), BigDecimal::add);
+                    BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0)), TimeUtil::addHours);
             cursor = cursor.plusDays(1);
         }
         return actualByMonth.entrySet().stream()
@@ -213,10 +215,10 @@ public final class RMSCalculationUtils {
         for (LocalDate weekStart : orderedWeeks) {
             BigDecimal actual = actualByDate.entrySet().stream()
                     .filter(e -> weekStart.equals(e.getKey().with(DayOfWeek.MONDAY)))
-                    .map(Map.Entry::getValue).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .map(Map.Entry::getValue).reduce(BigDecimal.ZERO, TimeUtil::addHours);
             BigDecimal planned = plannedByDate.entrySet().stream()
                     .filter(e -> weekStart.equals(e.getKey().with(DayOfWeek.MONDAY)))
-                    .map(e -> BigDecimal.valueOf(e.getValue())).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .map(e -> BigDecimal.valueOf(e.getValue())).reduce(BigDecimal.ZERO, TimeUtil::addHours);
             if (safePercentage(actual, planned) < 70) {
                 if (++consecutive >= 4) return true;
             } else {

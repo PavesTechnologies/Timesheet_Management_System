@@ -1,5 +1,7 @@
 package com.intranet.service.Manager;
 
+import com.intranet.service.TimeUtil;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
@@ -139,8 +141,7 @@ public class ManagerSummaryService {
 
         double billablePercent = BigDecimal.ZERO.equals(totalHours)
                 ? 0.0
-                : billableHours.divide(totalHours, 2, RoundingMode.HALF_UP)
-                        .multiply(BigDecimal.valueOf(100)).doubleValue();
+                : TimeUtil.percentOfHoursScaled(billableHours, totalHours).doubleValue();
 
         // ------------------------------
         // 4️⃣ Pending Approvals

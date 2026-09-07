@@ -1,5 +1,7 @@
 package com.intranet.service.utilization;
 
+import com.intranet.service.TimeUtil;
+
 import com.intranet.dto.rms.RMSProjectHoursDTO;
 import com.intranet.dto.rms.UtilizationSummaryDTO;
 import com.intranet.entity.InternalProject;
@@ -69,9 +71,9 @@ public class UtilizationSummaryService {
         BigDecimal internalHours = projectBreakdown.stream()
                 .filter(p -> p.getProjectId() != null && internalProjectIds.contains(p.getProjectId()))
                 .map(RMSProjectHoursDTO::getHours)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
-        BigDecimal nonBillableHours = nonBillableRaw.subtract(internalHours).max(BigDecimal.ZERO);
+        BigDecimal nonBillableHours = TimeUtil.subtractHours(nonBillableRaw, internalHours);
         int totalProjects = projectBreakdown.size();
         int totalClients = totalProjects; // no separate client table; use project count as proxy
 

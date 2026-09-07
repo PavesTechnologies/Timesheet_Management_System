@@ -1,5 +1,7 @@
 package com.intranet.repository;
 
+import com.intranet.service.TimeUtil;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -60,35 +62,66 @@ public interface TimeSheetRepo extends JpaRepository<TimeSheet, Long> {
                                                               @Param("startDate") LocalDate startDate,
                                                               @Param("endDate") LocalDate endDate);
 
-    @Query("SELECT COALESCE(SUM(t.hoursWorked), 0) " +
+    /*
+     * HH.MM literals cannot be summed with SQL SUM(): 0.30 + 0.30 gives 0.60 where the answer
+     * is 1.00. These queries sum MINUTES instead - exact, because the column is DECIMAL - and
+     * the default methods convert back to HH.MM so callers are unchanged.
+     */
+    @Query("SELECT COALESCE(SUM(FLOOR(t.hoursWorked) * 60 + (t.hoursWorked - FLOOR(t.hoursWorked)) * 100), 0) " +
            "FROM TimeSheet t " +
            "WHERE t.workDate BETWEEN :startDate AND :endDate")
-    BigDecimal getTotalHoursForAllUsers(LocalDate startDate, LocalDate endDate);
+    BigDecimal getTotalMinutesForAllUsers(LocalDate startDate, LocalDate endDate);
+
+    /** Total as an HH.MM literal; the query above sums minutes. */
+    default BigDecimal getTotalHoursForAllUsers(LocalDate startDate, LocalDate endDate) {
+        return TimeUtil.minutesResultToHHMM(getTotalMinutesForAllUsers(startDate, endDate));
+    }
 
     @Query("SELECT COUNT(DISTINCT t.userId) " +
            "FROM TimeSheet t " +
            "WHERE t.workDate BETWEEN :startDate AND :endDate")
     Long getUniqueUserCount(LocalDate startDate, LocalDate endDate);
 
-    @Query("SELECT DAYNAME(t.workDate), COALESCE(SUM(t.hoursWorked), 0) " +
+    @Query("SELECT DAYNAME(t.workDate), COALESCE(SUM(FLOOR(t.hoursWorked) * 60 + (t.hoursWorked - FLOOR(t.hoursWorked)) * 100), 0) " +
            "FROM TimeSheet t " +
            "WHERE t.workDate BETWEEN :startDate AND :endDate " +
            "GROUP BY DAYNAME(t.workDate), t.workDate " +
            "ORDER BY t.workDate")
-    List<Object[]> getDailyHoursBreakdown(LocalDate startDate, LocalDate endDate);
+    List<Object[]> getDailyMinutesBreakdown(LocalDate startDate, LocalDate endDate);
 
-    @Query("SELECT CONCAT('Week ', WEEK(t.workDate)), COALESCE(SUM(t.hoursWorked), 0) " +
+    /** [label, HH.MM hours]; the query above sums minutes. */
+    default List<Object[]> getDailyHoursBreakdown(LocalDate startDate, LocalDate endDate) {
+        List<Object[]> rows = getDailyMinutesBreakdown(startDate, endDate);
+        rows.forEach(r -> r[1] = TimeUtil.minutesResultToHHMM(r[1]));
+        return rows;
+    }
+
+    @Query("SELECT CONCAT('Week ', WEEK(t.workDate)), COALESCE(SUM(FLOOR(t.hoursWorked) * 60 + (t.hoursWorked - FLOOR(t.hoursWorked)) * 100), 0) " +
            "FROM TimeSheet t " +
            "WHERE t.workDate BETWEEN :startDate AND :endDate " +
            "GROUP BY WEEK(t.workDate), YEAR(t.workDate), CONCAT('Week ', WEEK(t.workDate)) " +
            "ORDER BY WEEK(t.workDate)")
-    List<Object[]> getWeeklyHoursBreakdown(LocalDate startDate, LocalDate endDate);
+    List<Object[]> getWeeklyMinutesBreakdown(LocalDate startDate, LocalDate endDate);
 
-    @Query("SELECT MONTHNAME(t.workDate), COALESCE(SUM(t.hoursWorked), 0) " +
+    /** [label, HH.MM hours]; the query above sums minutes. */
+    default List<Object[]> getWeeklyHoursBreakdown(LocalDate startDate, LocalDate endDate) {
+        List<Object[]> rows = getWeeklyMinutesBreakdown(startDate, endDate);
+        rows.forEach(r -> r[1] = TimeUtil.minutesResultToHHMM(r[1]));
+        return rows;
+    }
+
+    @Query("SELECT MONTHNAME(t.workDate), COALESCE(SUM(FLOOR(t.hoursWorked) * 60 + (t.hoursWorked - FLOOR(t.hoursWorked)) * 100), 0) " +
            "FROM TimeSheet t " +
            "WHERE t.workDate BETWEEN :startDate AND :endDate " +
            "GROUP BY MONTH(t.workDate), YEAR(t.workDate), MONTHNAME(t.workDate) " +
            "ORDER BY YEAR(t.workDate), MONTH(t.workDate)")
-    List<Object[]> getMonthlyHoursBreakdown(LocalDate startDate, LocalDate endDate);
+    List<Object[]> getMonthlyMinutesBreakdown(LocalDate startDate, LocalDate endDate);
+
+    /** [label, HH.MM hours]; the query above sums minutes. */
+    default List<Object[]> getMonthlyHoursBreakdown(LocalDate startDate, LocalDate endDate) {
+        List<Object[]> rows = getMonthlyMinutesBreakdown(startDate, endDate);
+        rows.forEach(r -> r[1] = TimeUtil.minutesResultToHHMM(r[1]));
+        return rows;
+    }
 
 }

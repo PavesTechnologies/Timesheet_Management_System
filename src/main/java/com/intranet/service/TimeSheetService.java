@@ -697,20 +697,19 @@ public class TimeSheetService {
                     .filter(TimeSheetEntry::isBillable)
                     .map(TimeSheetEntry::getHoursWorked)
                     .filter(Objects::nonNull)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
             BigDecimal nonBillableHours = projectEntries.stream()
                     .filter(e -> !e.isBillable())
                     .map(TimeSheetEntry::getHoursWorked)
                     .filter(Objects::nonNull)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
-            BigDecimal totalHours = billableHours.add(nonBillableHours);
+            BigDecimal totalHours = TimeUtil.addHours(billableHours, nonBillableHours);
 
             // Calculate utilization percentage (billable hours / total hours * 100)
             Double utilizationPercentage = totalHours.compareTo(BigDecimal.ZERO) > 0 
-                    ? billableHours.divide(totalHours, 4, RoundingMode.HALF_UP)
-                              .multiply(BigDecimal.valueOf(100))
+                    ? TimeUtil.percentOfHoursScaled(billableHours, totalHours)
                               .doubleValue()
                     : 0.0;
 

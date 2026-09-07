@@ -265,7 +265,7 @@ public class MonthlyUserReportService {
                         break; // skip weekends
 
                         default:
-                        totalLeaveHours = totalLeaveHours.add(BigDecimal.valueOf(leaveHours));
+                        totalLeaveHours = TimeUtil.addHours(totalLeaveHours, BigDecimal.valueOf(leaveHours));
                         totalLeaveDays++;
                         leaveDates.add(date);
                 }
