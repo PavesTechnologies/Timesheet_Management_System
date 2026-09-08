@@ -405,7 +405,7 @@ private TimeSheetSummaryDTO mapToSummaryDTOForManager(TimeSheet ts, Long manager
                             .filter(h -> h != null)
                             .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
-                    BigDecimal totalHoursBN = billable.add(nonBillable);
+                    BigDecimal totalHoursBN = TimeUtil.addHours(billable, nonBillable);
 
                     List<WeekSummaryDTO> weekSummaries = userSheets.stream()
                             .collect(Collectors.groupingBy(ts -> ts.getWeekInfo().getWeekNo()))
