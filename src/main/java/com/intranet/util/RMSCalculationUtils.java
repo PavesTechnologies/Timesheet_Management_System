@@ -61,7 +61,7 @@ public final class RMSCalculationUtils {
                 .filter(ts -> ts.getStatus() == TimeSheet.Status.DRAFT)
                 .map(ts -> safe(ts.getHoursWorked()))
                 .reduce(BigDecimal.ZERO, TimeUtil::addHours);
-        BigDecimal total = approved.add(draft);
+        BigDecimal total = TimeUtil.addHours(approved, draft);
         if (total.compareTo(BigDecimal.ZERO) == 0) return 50;
         return approved.multiply(BigDecimal.valueOf(100))
                 .divide(total, 0, RoundingMode.HALF_UP)
