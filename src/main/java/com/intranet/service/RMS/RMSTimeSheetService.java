@@ -525,8 +525,8 @@ public class RMSTimeSheetService {
         LocalDate cursor = startDate;
         while (!cursor.isAfter(endDate)) {
             LocalDate weekKey = cursor.with(DayOfWeek.MONDAY);
-            actualByWeek.put(weekKey, actualByWeek.getOrDefault(weekKey, BigDecimal.ZERO).add(actualByDate.getOrDefault(cursor, BigDecimal.ZERO)));
-            plannedByWeek.put(weekKey, plannedByWeek.getOrDefault(weekKey, BigDecimal.ZERO).add(BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0))));
+            actualByWeek.put(weekKey, TimeUtil.addHours(actualByWeek.getOrDefault(weekKey, BigDecimal.ZERO), actualByDate.getOrDefault(cursor, BigDecimal.ZERO)));
+            plannedByWeek.put(weekKey, TimeUtil.addHours(plannedByWeek.getOrDefault(weekKey, BigDecimal.ZERO), BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0))));
             cursor = cursor.plusDays(1);
         }
 
@@ -556,8 +556,8 @@ public class RMSTimeSheetService {
         LocalDate cursor = startDate;
         while (!cursor.isAfter(endDate)) {
             YearMonth monthKey = YearMonth.from(cursor);
-            actualByMonth.put(monthKey, actualByMonth.getOrDefault(monthKey, BigDecimal.ZERO).add(actualByDate.getOrDefault(cursor, BigDecimal.ZERO)));
-            plannedByMonth.put(monthKey, plannedByMonth.getOrDefault(monthKey, BigDecimal.ZERO).add(BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0))));
+            actualByMonth.put(monthKey, TimeUtil.addHours(actualByMonth.getOrDefault(monthKey, BigDecimal.ZERO), actualByDate.getOrDefault(cursor, BigDecimal.ZERO)));
+            plannedByMonth.put(monthKey, TimeUtil.addHours(plannedByMonth.getOrDefault(monthKey, BigDecimal.ZERO), BigDecimal.valueOf(plannedByDate.getOrDefault(cursor, 0))));
             cursor = cursor.plusDays(1);
         }
 
@@ -671,7 +671,7 @@ public class RMSTimeSheetService {
                 .map(ts -> safe(ts.getHoursWorked()))
                 .reduce(BigDecimal.ZERO, TimeUtil::addHours);
 
-        BigDecimal total = approved.add(draft);
+        BigDecimal total = TimeUtil.addHours(approved, draft);
         if (total.compareTo(BigDecimal.ZERO) == 0) {
             return 50;
         }

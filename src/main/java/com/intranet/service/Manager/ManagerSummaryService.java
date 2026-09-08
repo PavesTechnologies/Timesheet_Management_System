@@ -185,19 +185,18 @@ public class ManagerSummaryService {
     // ------------------------------
     // HOURS CALCULATIONS
     // ------------------------------
+    // convert() yields an HH.MM literal, so these must accumulate through TimeUtil.
+    // Adding them with BigDecimal.add treated 0.30 as three tenths of an hour and made
+    // "Hours logged by team" read 60.4 for a team that had actually logged 64.
     private BigDecimal sumHours(List<TimeSheetEntry> entries) {
-        BigDecimal sum = BigDecimal.ZERO;
-        for (TimeSheetEntry e : entries) {
-            sum = sum.add(convert(e));
-        }
-        return sum;
+        return TimeUtil.sumEntryHours(entries);
     }
 
     private BigDecimal sumBillableHours(List<TimeSheetEntry> entries) {
         BigDecimal sum = BigDecimal.ZERO;
         for (TimeSheetEntry e : entries) {
             if (e.isBillable()) {
-                sum = sum.add(convert(e));
+                sum = TimeUtil.addHours(sum, convert(e));
             }
         }
         return sum;
