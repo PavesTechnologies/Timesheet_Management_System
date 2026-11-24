@@ -104,7 +104,7 @@
 		<dependency>
     <groupId>org.springdoc</groupId>
     <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-    <version>2.5.0</version> <!-- Check for latest version if needed -->
+    <version>2.8.9</version> <!-- 2.8.x required for Spring Boot 3.5.x -->
         </dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>
